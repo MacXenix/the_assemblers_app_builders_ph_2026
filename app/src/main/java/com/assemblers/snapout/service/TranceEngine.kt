@@ -68,10 +68,16 @@ class TranceEngine(
         if (!c) endSession(System.currentTimeMillis())
     }
 
+    private fun isMonitoredFeed(pkg: String?): Boolean {
+        if (pkg == null || !FeedApps.isFeed(pkg)) return false
+        val enabled = settings.state.value.enabledFeeds
+        return enabled.isEmpty() || pkg in enabled
+    }
+
     fun onWindowChanged(pkg: String?, now: Long) {
         _diag.value = _diag.value.copy(windowEvents = _diag.value.windowEvents + 1, lastPackage = pkg)
         if (pkg == null || pkg in FeedApps.transient || pkg == OWN_PACKAGE) return
-        if (FeedApps.isFeed(pkg)) {
+        if (isMonitoredFeed(pkg)) {
             leftFeedAt = null
             if (feedPackage != pkg) {
                 if (feedPackage != null) endSession(now)
@@ -85,7 +91,7 @@ class TranceEngine(
     }
 
     fun onScroll(pkg: String?, sig: ScrollSignal, now: Long) {
-        val feed = FeedApps.isFeed(pkg)
+        val feed = isMonitoredFeed(pkg)
         val d = _diag.value
         _diag.value = d.copy(
             scrollEvents = d.scrollEvents + 1,
@@ -100,7 +106,7 @@ class TranceEngine(
 
     fun onClick(pkg: String?, now: Long) {
         _diag.value = _diag.value.copy(clickEvents = _diag.value.clickEvents + 1)
-        if (FeedApps.isFeed(pkg)) scorer.onTap(now)
+        if (isMonitoredFeed(pkg)) scorer.onTap(now)
     }
 
     /** Called every second by the service. */

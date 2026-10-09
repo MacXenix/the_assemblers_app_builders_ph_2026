@@ -6,13 +6,24 @@ import java.util.Calendar
 import java.util.Locale
 import kotlin.math.roundToInt
 
-data class AppUsage(val app: String, val sessions: Int, val minutes: Int, val swipes: Int)
+data class AppUsage(
+    val app: String,
+    val sessions: Int,
+    val minutes: Int,
+    val swipes: Int,
+    val meters: Int = 0,
+    val avgSecondsPerVideo: Double = 0.0,
+    val tapsPer100Swipes: Int = 0,
+    val longestSessionMinutes: Int = 0,
+    val lateNightPct: Int = 0,
+)
 
 /** Aggregated feed analytics over the last [days] days. This (not raw events) is what the local model analyses. */
 data class UsageSummary(
     val days: Int = 0,
     val sessions: Int = 0,
     val totalMinutes: Int = 0,
+    val totalMeters: Int = 0,
     val minutesPerDay: Int = 0,
     val totalSwipes: Int = 0,
     val avgSecondsPerVideo: Double = 0.0,
@@ -33,9 +44,9 @@ data class UsageSummary(
 
     fun toJson(): String {
         val appsJson = apps.joinToString(",") {
-            """{"app":"${it.app}","sessions":${it.sessions},"minutes":${it.minutes},"swipes":${it.swipes}}"""
+            """{"app":"${it.app}","sessions":${it.sessions},"minutes":${it.minutes},"swipes":${it.swipes},"meters":${it.meters},"avg_seconds_per_video":${fmt(it.avgSecondsPerVideo)},"taps_per_100_swipes":${it.tapsPer100Swipes},"longest_session_min":${it.longestSessionMinutes},"late_night_pct":${it.lateNightPct}}"""
         }
-        return """{"days":$days,"sessions":$sessions,"total_minutes":$totalMinutes,"minutes_per_day":$minutesPerDay,""" +
+        return """{"days":$days,"sessions":$sessions,"total_minutes":$totalMinutes,"total_meters":$totalMeters,"minutes_per_day":$minutesPerDay,""" +
             """"total_swipes":$totalSwipes,"avg_seconds_per_video":${fmt(avgSecondsPerVideo)},"taps_per_100_swipes":$tapsPer100Swipes,""" +
             """"avg_session_minutes":$avgSessionMinutes,"longest_session_minutes":$longestSessionMinutes,""" +
             """"late_night_pct":$lateNightPct,"dark_room_pct":$darkPct,"lying_down_pct":$lyingPct,""" +
@@ -54,6 +65,7 @@ data class UsageSummary(
             if (ss.isEmpty()) return UsageSummary(days = days)
             val minutes = ss.map { (it.endedAt - it.startedAt) / 60_000.0 }
             val total = minutes.sum()
+            val totalDist = ss.sumOf { it.distanceMeters }.roundToInt()
             fun pct(f: (FeedSession) -> Boolean) =
                 if (total <= 0) 0 else (100 * ss.indices.filter { f(ss[it]) }.sumOf { minutes[it] } / total).roundToInt()
             val swipes = ss.sumOf { it.swipes }
@@ -68,13 +80,39 @@ data class UsageSummary(
                 .mapValues { (_, idx) -> idx.sumOf { minutes[it] } }
             val activeDays = ss.map { cal.apply { timeInMillis = it.startedAt }.get(Calendar.DAY_OF_YEAR) }.distinct().size
             val apps = ss.indices.groupBy { ss[it].app }.map { (app, idx) ->
-                AppUsage(app, idx.size, idx.sumOf { minutes[it] }.roundToInt(), idx.sumOf { ss[it].swipes })
+                val appSessions = idx.map { ss[it] }
+                val appMinutes = idx.map { minutes[it] }
+                val appTotalMin = appMinutes.sum()
+                val appSwipes = appSessions.sumOf { it.swipes }
+                val appMeters = appSessions.sumOf { it.distanceMeters }.roundToInt()
+                val appDwellSessions = appSessions.filter { it.avgDwellMs > 0 }
+                val appAvgDwell = if (appDwellSessions.isEmpty()) {
+                    if (appSwipes == 0) 0.0 else appTotalMin * 60 / appSwipes
+                } else {
+                    appDwellSessions.sumOf { it.avgDwellMs * it.swipes.toDouble() } / appDwellSessions.sumOf { it.swipes }.coerceAtLeast(1) / 1000.0
+                }
+                val appTapsPer100 = if (appSwipes == 0) 0 else 100 * appSessions.sumOf { it.taps } / appSwipes
+                val appLongestMin = if (appMinutes.isEmpty()) 0 else appMinutes.max().roundToInt()
+                val appLatePct = if (appTotalMin <= 0) 0 else (100 * appSessions.indices.filter { appSessions[it].late }.sumOf { appMinutes[it] } / appTotalMin).roundToInt()
+
+                AppUsage(
+                    app = app,
+                    sessions = idx.size,
+                    minutes = appTotalMin.roundToInt(),
+                    swipes = appSwipes,
+                    meters = appMeters,
+                    avgSecondsPerVideo = appAvgDwell,
+                    tapsPer100Swipes = appTapsPer100,
+                    longestSessionMinutes = appLongestMin,
+                    lateNightPct = appLatePct,
+                )
             }.sortedByDescending { it.minutes }
             val ns = interventions.filter { it.at >= since }
             return UsageSummary(
                 days = days,
                 sessions = ss.size,
                 totalMinutes = total.roundToInt(),
+                totalMeters = totalDist,
                 minutesPerDay = (total / activeDays.coerceAtLeast(1)).roundToInt(),
                 totalSwipes = swipes,
                 avgSecondsPerVideo = avgDwell,
@@ -110,13 +148,21 @@ object RuleInsights {
         val tips = mutableListOf<InsightItem>()
         s.apps.firstOrNull()?.let { top ->
             val share = if (s.totalMinutes == 0) 0 else 100 * top.minutes / s.totalMinutes
-            found += InsightItem(false, "$share% of your feed time (${top.minutes} min) was on ${top.app}, about ${s.minutesPerDay} min per active day.")
+            found += InsightItem(false, "$share% of your feed time (${top.minutes} min, ${top.meters}m scrolled) was on ${top.app}.")
         }
-        if (s.avgSecondsPerVideo in 0.1..8.0) {
+        val fastestApp = s.apps.filter { it.avgSecondsPerVideo > 0 }.minByOrNull { it.avgSecondsPerVideo }
+        if (fastestApp != null && fastestApp.avgSecondsPerVideo < 6.0) {
+            found += InsightItem(false, "Fastest swiping is on ${fastestApp.app} (${"%.1f".format(fastestApp.avgSecondsPerVideo)}s/video, ${fastestApp.swipes} swipes).")
+            tips += InsightItem(true, "Set a 15-minute timer before opening ${fastestApp.app} to interrupt rapid skimming.")
+        } else if (s.avgSecondsPerVideo in 0.1..8.0) {
             found += InsightItem(false, "You spend about ${"%.0f".format(s.avgSecondsPerVideo)} s per video before swiping, which is skim mode rather than watching.")
             tips += InsightItem(true, "When you notice fast swiping, pick one video to watch fully or close the app.")
         }
-        if (s.lateNightPct >= 30) {
+        val highestLateApp = s.apps.maxByOrNull { it.lateNightPct }
+        if (highestLateApp != null && highestLateApp.lateNightPct >= 40) {
+            found += InsightItem(false, "${highestLateApp.app} has your highest late-night use (${highestLateApp.lateNightPct}% after 22:00).")
+            tips += InsightItem(true, "Move ${highestLateApp.app} to a hidden folder to curb reflex opening before bed.")
+        } else if (s.lateNightPct >= 30) {
             found += InsightItem(false, "${s.lateNightPct}% of your scrolling happened between 22:00 and 05:00.")
             tips += InsightItem(true, "Set a phone-down time 30 minutes before bed and charge the phone away from your bed.")
         }

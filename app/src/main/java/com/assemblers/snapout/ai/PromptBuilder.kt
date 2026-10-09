@@ -122,14 +122,15 @@ object PromptBuilder {
     fun streamView(raw: String): String =
         raw.replace(Regex("(?s)<think>.*?</think>"), "").substringBefore("<think>").trimStart()
 
-    const val INSIGHTS_SYSTEM = "You are SnapOut's private on-device usage analyst. Below are the user's short-form feed statistics " +
-        "(JSON) for the last few days, measured only from scroll timing, taps, time of day and phone sensors. " +
-        "Write exactly 3 lines that start with \"Insight:\", each stating one specific pattern and citing the numbers. " +
-        "Then write exactly 3 lines that start with \"Tip:\", each giving one small, concrete, practical way to improve, tied to the user's goal. " +
-        "Each line at most 25 words. No shaming, no diagnosis, no medical claims, no emojis, no markdown. Output only those 6 lines."
+    const val INSIGHTS_SYSTEM = "You are SnapOut's on-device digital wellbeing analyst. Below is the user's dashboard usage summary " +
+        "from their local phone sensors and feed sessions over the past few days, including overall totals and a specific telemetry breakdown for each monitored app (sessions, minutes, scroll meters, average seconds per video, engagement taps, longest session, and late-night percentage). " +
+        "Analyze what this dashboard data reveals about their scrolling loops across different apps, swipe speeds, feed mileage, late-night habits, and nudge responses. " +
+        "Write exactly 3 lines starting with \"Insight: \", each highlighting an impactful observation directly citing specific app numbers or comparisons (e.g., top app minutes/meters, rapid swiping on TikTok, or late-night scrolling in bed). " +
+        "Then write exactly 3 lines starting with \"Tip: \", each providing a compassionate, practical micro-action tailored to a specific app habit or tied to their goal. " +
+        "Keep each line concise (under 25 words). No shaming, no emojis, no medical claims. Output only those 6 lines."
 
     fun insightsPrompt(summaryJson: String, goal: String) =
-        "$INSIGHTS_SYSTEM\n\nUser goal: ${goal.ifBlank { "use my phone more intentionally" }}\nStatistics: $summaryJson\nWrite the 6 lines."
+        "$INSIGHTS_SYSTEM\n\nUser Goal: ${goal.ifBlank { "use my phone intentionally and reduce mindless scrolling" }}\nDashboard Statistics (including per-app breakdown): $summaryJson\nWrite the 6 lines."
 
     private val insightLine = Regex("^(insight|tip)s?\\s*\\d*\\s*[:\\-]\\s*(.+)$", RegexOption.IGNORE_CASE)
 
@@ -142,15 +143,19 @@ object PromptBuilder {
             .filter { item -> item.text.length > 8 && banned.none { item.text.lowercase().contains(it) } }
             .let { items -> items.filterNot { it.tip }.take(4) + items.filter { it.tip }.take(4) }
 
-    const val CHAT_SYSTEM = "You are SnapOut's private on-device assistant. Answer the user's question about their short-form feed scrolling " +
-        "using ONLY the statistics JSON below (last 7 days, measured from scroll timing, taps, time of day and phone sensors; screen content is never read). " +
-        "Cite the exact numbers and app names from the JSON. If the statistics do not contain the answer, say you only know these usage stats. " +
-        "At most 3 short sentences. No shaming, no diagnosis, no medical claims, no emojis, no markdown."
+    const val CHAT_SYSTEM = "You are SnapOut, an empathetic on-device digital wellbeing and attention coach. " +
+        "You help the user break mindless short-form doom-scrolling and build intentional phone habits. " +
+        "Use the user's goal and statistics below as personal context. " +
+        "Provide warm, practical, actionable advice and psychological reframing. " +
+        "When asked about nudges, explain how to use the circuit-breaker (breathing pause, putting the phone down, or leaving the feed). " +
+        "When asked how to improve, give concrete, compassionate behavioral tips tailored to their usage. " +
+        "Keep your response natural, conversational, and concise (2 to 4 sentences). Never shame the user, no emojis, no medical claims."
 
     fun chatPrompt(question: String, summaryJson: String, goal: String, history: List<ChatMsg>): String {
         val past = history.joinToString("\n") { (if (it.fromUser) "User: " else "SnapOut: ") + it.text }
-        return "$CHAT_SYSTEM\n\nUser goal: ${goal.ifBlank { "use my phone more intentionally" }}\nStatistics: $summaryJson\n" +
-            (if (past.isNotBlank()) "Conversation so far:\n$past\n" else "") +
+        return "$CHAT_SYSTEM\n\nUser's Personal Goal: ${goal.ifBlank { "use my phone more intentionally and sleep earlier" }}\n" +
+            "User's 7-Day Usage Telemetry: $summaryJson\n" +
+            (if (past.isNotBlank()) "Conversation History:\n$past\n" else "") +
             "User: $question\nSnapOut:"
     }
 
@@ -164,27 +169,27 @@ object PromptBuilder {
 
     /** Answer from the stats alone, used when no model is available. */
     fun ruleAnswer(question: String, s: UsageSummary): String {
-        if (s.empty) return "No feed sessions logged yet. Scroll with SnapOut on, or tap Load sample week (demo)."
+        if (s.empty) return "No feed sessions logged yet. Scroll with SnapOut on, or tap Load sample week (demo) to see stats and tips."
         val q = question.lowercase()
         val top = s.apps.maxByOrNull { it.minutes }
         fun has(vararg w: String) = w.any { q.contains(it) }
         return when {
-            has("improve", "tip", "help", "should", "stop", "reduce") ->
-                RuleInsights.from(s).filter { it.tip }.joinToString(" ") { it.text }.ifBlank { "Try a fixed stop time and keep the phone out of bed." }
+            has("nudge", "respond", "notification") ->
+                "When a nudge appears, use the 10-second breathing pause to reset your attention. You can choose to leave the feed, put your phone face down, or snooze if needed. So far, you've left the feed ${s.wentHome} times out of ${s.nudges} nudges."
+            has("improve", "tip", "help", "should", "stop", "reduce", "better") ->
+                "The most effective step is targeting your top app (${top?.app ?: "social media"}). Try setting a 10-minute bedtime cutoff and charging your phone across the room—currently ${s.lateNightPct}% of your scrolling happens late at night."
             has("app", "most", "often", "which", "where") && top != null ->
-                "${top.app} is your top feed: ${top.minutes} of ${s.totalMinutes} min over ${top.sessions} sessions in the last ${s.days} days." +
+                "${top.app} is your most active feed: ${top.minutes} of ${s.totalMinutes} total minutes over ${top.sessions} sessions." +
                     s.apps.filter { it != top }.joinToString("") { " ${it.app}: ${it.minutes} min." }
             has("when", "hour", "time", "night", "late") ->
-                "You scroll most around ${s.peakHour?.let { "%02d:00".format(it) } ?: "no clear hour"}; ${s.lateNightPct}% of your feed time is after 22:00."
-            has("swipe", "video", "fast", "skip") ->
-                "${s.totalSwipes} swipes in ${s.days} days, about ${"%.1f".format(s.avgSecondsPerVideo)} s per video."
-            has("tap", "like", "comment") -> "You tap ${s.tapsPer100Swipes} times per 100 swipes, so most videos are watched without interacting."
+                "Your heaviest scrolling happens around ${s.peakHour?.let { "%02d:00".format(it) } ?: "nighttime"}; ${s.lateNightPct}% of your feed time is after 22:00 in bed."
+            has("swipe", "video", "fast", "skip", "speed") ->
+                "You average about ${"%.1f".format(s.avgSecondsPerVideo)} seconds per video and ${s.tapsPer100Swipes} taps per 100 swipes, showing a fast, passive consumption pattern."
+            has("tap", "like", "comment") -> "You tap ${s.tapsPer100Swipes} times per 100 swipes—meaning 98% of your time is spent in passive watching."
             has("long", "session", "minute", "much") ->
-                "${s.minutesPerDay} min per active day, ${s.sessions} sessions, average ${s.avgSessionMinutes} min, longest ${s.longestSessionMinutes} min."
-            has("nudge", "notification") ->
-                "${s.nudges} nudges: you left the feed ${s.wentHome} times, snoozed ${s.snoozed}, ignored ${s.ignored}."
-            has("bed", "lying", "lie") -> "${s.lyingPct}% of your sessions were while lying down, and ${s.darkPct}% in the dark."
-            else -> "Last ${s.days} days: ${s.totalMinutes} min across ${s.sessions} sessions, mostly ${top?.app ?: "—"}. Ask about apps, times, swipes, taps, sessions or nudges."
+                "You average ${s.minutesPerDay} minutes per active day across ${s.sessions} sessions, with your longest session lasting ${s.longestSessionMinutes} minutes."
+            has("bed", "lying", "lie") -> "${s.lyingPct}% of your sessions happen while lying down, and ${s.darkPct}% in total darkness."
+            else -> "I'm your SnapOut wellbeing coach. Ask me how to improve your focus, how to respond to nudges, or about your top scrolling habits."
         }
     }
 

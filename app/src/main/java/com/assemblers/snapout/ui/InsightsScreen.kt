@@ -12,6 +12,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -48,9 +51,17 @@ import com.assemblers.snapout.core.render
 import com.assemblers.snapout.ui.theme.Amber
 import com.assemblers.snapout.ui.theme.Coral
 import com.assemblers.snapout.ui.theme.Mint
+import androidx.compose.foundation.Canvas
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+import androidx.compose.material3.FilterChip
+import com.assemblers.snapout.ai.EngineStatus
 
 private val fmt = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
 
@@ -59,29 +70,81 @@ fun InsightsScreen(app: SnapOutApp, modifier: Modifier = Modifier) {
     val version by app.db.version.collectAsState()
     val settings by app.settings.state.collectAsState()
     val run by app.llm.insightRun.collectAsState()
+    val ai by app.llm.status.collectAsState()
     val interventions = remember(version) { app.db.interventions(500) }
     val sessions = remember(version) { app.db.sessions(500) }
     val summary = remember(version) { UsageSummary.from(sessions, interventions, System.currentTimeMillis()) }
 
-    LazyColumn(modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    var showAllNudges by remember { mutableStateOf(false) }
+    var showAllSessions by remember { mutableStateOf(false) }
+
+    val displayedNudges = if (showAllNudges) interventions else interventions.take(5)
+    val displayedSessions = if (showAllSessions) sessions else sessions.take(5)
+
+    LazyColumn(modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         item {
             Column(Modifier.padding(top = 20.dp)) {
-                Text("Insights", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-                Text("Last ${summary.days} days · computed on this phone only", fontSize = 12.sp, color = Color.Gray)
+                Text("Insights & On-Device AI", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                Text("Last ${summary.days} days telemetry · 100% on-device", fontSize = 12.sp, color = Color.Gray)
             }
         }
-        if (summary.empty) item {
+
+        // 1. On-Device AI Model Control Card
+        item {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("No feed sessions logged yet.", fontWeight = FontWeight.SemiBold)
-                    Text("Scroll in TikTok, YouTube or Instagram with SnapOut on, or load a sample week to try Insights.", fontSize = 13.sp)
-                    OutlinedButton(onClick = { SampleData.week(System.currentTimeMillis()).let { (s, i) -> app.db.insertSample(s, i) } }) {
-                        Text("Load sample week (demo)")
+                    Text("Local AI Model", fontWeight = FontWeight.SemiBold)
+                    val (line, color) = when (ai.status) {
+                        EngineStatus.NO_MODEL -> "No model loaded. Place .litertlm file in app storage." to Coral
+                        EngineStatus.IDLE -> "${ai.modelName} · ready to load" to Amber
+                        EngineStatus.LOADING -> "Loading ${ai.modelName}…" to Amber
+                        EngineStatus.READY -> "${ai.modelName} · ${ai.backend} · loaded in ${ai.loadMs} ms" to Mint
+                        EngineStatus.ERROR -> "Error: ${ai.error}" to Coral
+                    }
+                    Text(line, color = color, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
+                    Text("100% private on-device LLM (LiteRT-LM). Zero network access.", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
+
+                    val models = remember(ai) { app.llm.modelCandidates() }
+                    if (models.size > 1) {
+                        Text("Available models:", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            models.forEach { f ->
+                                FilterChip(
+                                    selected = f.name == ai.modelName,
+                                    onClick = {
+                                        app.settings.update { it.copy(modelFile = f.name) }
+                                        app.llm.switchModel()
+                                    },
+                                    label = { Text("${f.name.removeSuffix(".litertlm")} (${f.length() / 1_000_000} MB)", fontSize = 11.sp) },
+                                )
+                            }
+                        }
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { app.llm.warmUp() }, enabled = ai.status == EngineStatus.IDLE || ai.status == EngineStatus.ERROR) {
+                            Text("Load model now")
+                        }
+                        OutlinedButton(onClick = { app.llm.refreshModelPresence() }) { Text("Rescan") }
+                    }
+                }
+            }
+        }
+
+        if (summary.empty) {
+            item {
+                Card(Modifier.fillMaxWidth()) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("No feed sessions logged yet.", fontWeight = FontWeight.SemiBold)
+                        Text("Scroll in TikTok, YouTube or Instagram with SnapOut on, or tap below to load a sample week for full stats.", fontSize = 13.sp)
+                        OutlinedButton(onClick = { SampleData.week(System.currentTimeMillis()).let { (s, i) -> app.db.insertSample(s, i) } }) {
+                            Text("Load sample week (demo)")
+                        }
                     }
                 }
             }
         } else {
-            item { StatsCard(summary) }
+            item { StatsCard(summary, sessions, interventions) }
             item {
                 AnalysisCard(
                     stored = settings.insights,
@@ -89,7 +152,7 @@ fun InsightsScreen(app: SnapOutApp, modifier: Modifier = Modifier) {
                     at = settings.insightsAt,
                     running = run.running,
                     partial = run.partial,
-                    summaryJson = summary.toJson(),
+                    summary = summary,
                 ) {
                     app.llm.analyze(summary.toJson(), settings.goal) { items, model ->
                         val text = items?.render() ?: RuleInsights.from(summary).render()
@@ -102,37 +165,78 @@ fun InsightsScreen(app: SnapOutApp, modifier: Modifier = Modifier) {
 
         item { ChatCard(app, summary, settings.goal) }
 
-        item { Text("Nudges", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 12.dp)) }
-        if (interventions.isEmpty()) item { Text("None yet.", color = Color.Gray) }
-        items(interventions.take(30), key = { "i${it.id}" }) { i ->
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp)) {
-                    Text("${fmt.format(Date(i.at))} · ${i.app} · score ${i.score}", fontSize = 12.sp, color = Color.Gray)
-                    Text(i.text.ifBlank { "—" })
+        // Nudges Section with View All toggle
+        item {
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Recent Nudges (${interventions.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                if (interventions.size > 5) {
                     Text(
-                        "${if (i.source == "GEMMA") "On-device AI" else "Built-in"}${i.ttftMs?.let { " · $it ms" } ?: ""} · ${outcomeLabel(i.outcome)}",
-                        fontSize = 12.sp, color = Color.Gray,
+                        if (showAllNudges) "Show less" else "See all (${interventions.size})",
+                        fontSize = 12.sp,
+                        color = Amber,
+                        modifier = Modifier.clickable { showAllNudges = !showAllNudges },
                     )
                 }
             }
         }
-        item { Text("Feed sessions", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 12.dp)) }
-        if (sessions.isEmpty()) item { Text("None yet.", color = Color.Gray) }
-        items(sessions.take(30), key = { "s${it.id}" }) { s ->
+
+        if (interventions.isEmpty()) item { Text("No nudges triggered yet.", fontSize = 13.sp, color = Color.Gray) }
+        items(displayedNudges, key = { "i${it.id}" }) { i ->
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(12.dp)) {
-                    Text("${fmt.format(Date(s.startedAt))} · ${s.app}", fontWeight = FontWeight.SemiBold)
+                    Text("${fmt.format(Date(i.at))} · ${i.app} · score ${i.score}", fontSize = 12.sp, color = Color.Gray)
+                    Spacer(Modifier.height(2.dp))
+                    Text(i.text.ifBlank { "—" }, fontSize = 14.sp)
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        "${if (i.source == "GEMMA") "On-device AI" else "Built-in"}${i.ttftMs?.let { " · $it ms" } ?: ""} · ${outcomeLabel(i.outcome)}",
+                        fontSize = 11.sp, color = Color.Gray,
+                    )
+                }
+            }
+        }
+
+        // Feed Sessions Section with View All toggle
+        item {
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("Feed Sessions (${sessions.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                if (sessions.size > 5) {
+                    Text(
+                        if (showAllSessions) "Show less" else "See all (${sessions.size})",
+                        fontSize = 12.sp,
+                        color = Amber,
+                        modifier = Modifier.clickable { showAllSessions = !showAllSessions },
+                    )
+                }
+            }
+        }
+
+        if (sessions.isEmpty()) item { Text("No feed sessions recorded yet.", fontSize = 13.sp, color = Color.Gray) }
+        items(displayedSessions, key = { "s${it.id}" }) { s ->
+            Card(Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(12.dp)) {
+                    Text("${fmt.format(Date(s.startedAt))} · ${s.app}", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                    Spacer(Modifier.height(2.dp))
                     Text(
                         "%d min · %d swipes · %d taps · %.1f s/video · peak %d%s%s".format(
                             ((s.endedAt - s.startedAt) / 60_000).toInt(), s.swipes, s.taps, s.avgDwellMs / 1000.0, s.peakScore,
                             if (s.late) " · late" else "", if (s.intervened) " · nudged" else "",
                         ),
-                        fontSize = 13.sp,
+                        fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f),
                     )
                 }
             }
         }
-        item { Text("", Modifier.height(12.dp)) }
+
+        item { Spacer(Modifier.height(16.dp)) }
     }
 }
 
@@ -145,39 +249,184 @@ private fun outcomeLabel(o: String?) = when (o) {
 }
 
 @Composable
-private fun StatsCard(s: UsageSummary) {
+private fun StatsCard(
+    overall: UsageSummary,
+    allSessions: List<com.assemblers.snapout.data.FeedSession>,
+    allNudges: List<com.assemblers.snapout.data.Intervention>,
+) {
+    var selectedApp by remember { mutableStateOf<String?>(null) } // null = All Apps Average
+
+    // Compute stats for selected app or overall
+    val targetSessions = remember(selectedApp, allSessions) {
+        if (selectedApp == null) allSessions else allSessions.filter { it.app.equals(selectedApp, ignoreCase = true) }
+    }
+    val targetNudges = remember(selectedApp, allNudges) {
+        if (selectedApp == null) allNudges else allNudges.filter { it.app.equals(selectedApp, ignoreCase = true) }
+    }
+    val targetSummary = remember(targetSessions, targetNudges) {
+        if (selectedApp == null) overall else UsageSummary.from(targetSessions, targetNudges, System.currentTimeMillis())
+    }
+
+    val chartColors = listOf(Mint, Amber, Coral, Color(0xFF60A5FA), Color(0xFFA78BFA), Color(0xFFF472B6))
+
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Row {
-                Stat("${s.minutesPerDay} min", "per active day", Modifier.weight(1f))
-                Stat("${s.sessions}", "sessions", Modifier.weight(1f))
-                Stat("${s.totalSwipes}", "swipes", Modifier.weight(1f))
-            }
-            Row {
-                Stat("%.1f s".format(s.avgSecondsPerVideo), "per video", Modifier.weight(1f))
-                Stat("${s.tapsPer100Swipes}", "taps / 100 swipes", Modifier.weight(1f))
-                Stat("${s.longestSessionMinutes} min", "longest session", Modifier.weight(1f))
-            }
-            Row {
-                Stat("${s.lateNightPct}%", "after 22:00", Modifier.weight(1f))
-                Stat("${s.lyingPct}%", "lying down", Modifier.weight(1f))
-                Stat(s.peakHour?.let { "%02d:00".format(it) } ?: "—", "peak hour", Modifier.weight(1f))
-            }
-            Text("By app", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            s.apps.forEach { a ->
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(a.app, Modifier.weight(0.9f), fontSize = 13.sp)
-                    LinearProgressIndicator(
-                        progress = { if (s.totalMinutes == 0) 0f else a.minutes.toFloat() / s.totalMinutes },
-                        modifier = Modifier.weight(1.4f).height(6.dp), color = Amber,
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    if (selectedApp == null) "Dashboard: All Apps Average" else "Dashboard: $selectedApp",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                )
+                if (selectedApp != null) {
+                    Text(
+                        "Show All Apps",
+                        fontSize = 12.sp,
+                        color = Amber,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.clickable { selectedApp = null },
                     )
-                    Text("  ${a.minutes} min", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
                 }
             }
-            if (s.nudges > 0) Text(
-                "Nudges: ${s.nudges} · left the feed ${s.wentHome} · snoozed ${s.snoozed} · ignored ${s.ignored}",
-                fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f),
-            )
+
+            // App Filter Chips
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                FilterChip(
+                    selected = selectedApp == null,
+                    onClick = { selectedApp = null },
+                    label = { Text("All Apps (Avg)") },
+                )
+                overall.apps.forEach { a ->
+                    FilterChip(
+                        selected = selectedApp == a.app,
+                        onClick = { selectedApp = if (selectedApp == a.app) null else a.app },
+                        label = { Text("${a.app} (${a.minutes}m)") },
+                    )
+                }
+            }
+
+            // Visual Chart: Circular Distribution (Donut Chart) + Bar Comparison
+            if (overall.apps.isNotEmpty()) {
+                Card(
+                    colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.25f)),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("Time Distribution Chart", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.8f))
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                        ) {
+                            // Donut Chart
+                            Box(Modifier.size(100.dp), contentAlignment = Alignment.Center) {
+                                Canvas(Modifier.size(90.dp)) {
+                                    val strokeWidth = 14.dp.toPx()
+                                    val arcSize = Size(size.width - strokeWidth, size.height - strokeWidth)
+                                    val topLeft = Offset(strokeWidth / 2, strokeWidth / 2)
+                                    var startAngle = -90f
+                                    val totalMin = overall.totalMinutes.coerceAtLeast(1)
+
+                                    overall.apps.forEachIndexed { idx, app ->
+                                        val sweep = (app.minutes.toFloat() / totalMin) * 360f
+                                        val color = chartColors[idx % chartColors.size]
+                                        drawArc(
+                                            color = color,
+                                            startAngle = startAngle,
+                                            sweepAngle = sweep,
+                                            useCenter = false,
+                                            topLeft = topLeft,
+                                            size = arcSize,
+                                            style = Stroke(width = strokeWidth, cap = StrokeCap.Butt),
+                                        )
+                                        startAngle += sweep
+                                    }
+                                }
+                                Text(
+                                    "${targetSummary.totalMinutes}m",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Mint,
+                                )
+                            }
+
+                            // Legend & Quick Bars
+                            Column(Modifier.weight(1f).padding(start = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                overall.apps.take(4).forEachIndexed { idx, app ->
+                                    val color = chartColors[idx % chartColors.size]
+                                    val pct = if (overall.totalMinutes == 0) 0 else (100 * app.minutes / overall.totalMinutes)
+                                    Row(
+                                        Modifier.fillMaxWidth().clickable { selectedApp = app.app },
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Box(Modifier.size(8.dp, 8.dp).padding(end = 4.dp), contentAlignment = Alignment.Center) {
+                                            Canvas(Modifier.fillMaxSize()) { drawCircle(color) }
+                                        }
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(app.app, Modifier.weight(1f), fontSize = 11.sp, color = if (selectedApp == app.app) Amber else Color.White)
+                                        Text("$pct%", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = color)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Key Telemetry Metrics Grid for Selected App or All
+            Row {
+                Stat("${targetSummary.totalMeters} m", "feed mileage", Modifier.weight(1f))
+                Stat("${targetSummary.sessions}", "sessions", Modifier.weight(1f))
+                Stat("${targetSummary.totalMinutes} min", "total time", Modifier.weight(1f))
+            }
+            Row {
+                Stat("${targetSummary.longestSessionMinutes} min", "longest session", Modifier.weight(1f))
+                Stat("${targetSummary.totalSwipes}", "swipes", Modifier.weight(1f))
+                Stat("%.1f s".format(targetSummary.avgSecondsPerVideo), "per video", Modifier.weight(1f))
+            }
+            Row {
+                Stat("${targetSummary.lateNightPct}%", "after 22:00", Modifier.weight(1f))
+                Stat("${targetSummary.lyingPct}%", "lying down", Modifier.weight(1f))
+                Stat(targetSummary.peakHour?.let { "%02d:00".format(it) } ?: "—", "peak hour", Modifier.weight(1f))
+            }
+
+            // Bar Breakdown per App
+            Text("Feed Time Breakdown", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            overall.apps.forEachIndexed { idx, a ->
+                val isCur = selectedApp == a.app
+                Column(
+                    Modifier.fillMaxWidth().clickable { selectedApp = if (isCur) null else a.app }.padding(vertical = 2.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            a.app + if (isCur) " (selected)" else "",
+                            Modifier.weight(0.9f),
+                            fontSize = 13.sp,
+                            color = if (isCur) Amber else Color.White,
+                            fontWeight = if (isCur) FontWeight.Bold else FontWeight.Normal,
+                        )
+                        LinearProgressIndicator(
+                            progress = { if (overall.totalMinutes == 0) 0f else a.minutes.toFloat() / overall.totalMinutes },
+                            modifier = Modifier.weight(1.4f).height(7.dp),
+                            color = chartColors[idx % chartColors.size],
+                        )
+                        Text("  ${a.minutes} min", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                    }
+                }
+            }
+
+            if (targetSummary.nudges > 0) {
+                Text(
+                    "Nudges (${selectedApp ?: "all"}): ${targetSummary.nudges} · left feed ${targetSummary.wentHome} · snoozed ${targetSummary.snoozed} · ignored ${targetSummary.ignored}",
+                    fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f),
+                )
+            }
         }
     }
 }
@@ -197,15 +446,15 @@ private fun AnalysisCard(
     at: Long,
     running: Boolean,
     partial: String,
-    summaryJson: String,
+    summary: UsageSummary,
     onAnalyze: () -> Unit,
 ) {
     var showInput by remember { mutableStateOf(false) }
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("On-device analysis", fontWeight = FontWeight.SemiBold)
-            Text("The local model reads the numbers above (not your screen) and suggests ways to improve.", fontSize = 12.sp)
-            Button(onClick = onAnalyze, enabled = !running) { Text(if (running) "Analyzing…" else "Analyze my scrolling") }
+            Text("AI Dashboard Analysis", fontWeight = FontWeight.SemiBold)
+            Text("The local on-device model reads your dashboard telemetry and suggests concrete behavioral improvements.", fontSize = 12.sp)
+            Button(onClick = onAnalyze, enabled = !running) { Text(if (running) "Analyzing telemetry…" else "Analyze dashboard data") }
             if (running) {
                 LinearProgressIndicator(Modifier.fillMaxWidth(), color = Amber)
                 if (partial.isNotBlank()) Text(partial, fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = Color.White.copy(alpha = 0.7f))
@@ -222,14 +471,38 @@ private fun AnalysisCard(
                 }
             }
             if (items.isNotEmpty()) Text(
-                (if (by == "rules") "Rule-based (no model available)" else "Written by $by · on-device") + " · ${fmt.format(Date(at))}",
+                (if (by == "rules") "Rule-based (no model available)" else "Analyzed by $by · on-device") + " · ${fmt.format(Date(at))}",
                 fontSize = 11.sp, color = Color.Gray,
             )
             Text(
-                if (showInput) "Hide what the model saw" else "What the model sees",
+                if (showInput) "Hide formatted model input ▲" else "Inspect formatted input seen by AI ▼",
                 fontSize = 12.sp, color = Amber, modifier = Modifier.clickable { showInput = !showInput },
             )
-            if (showInput) Text(summaryJson, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = Color.White.copy(alpha = 0.7f))
+            if (showInput) {
+                Card(
+                    colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.3f)),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("• Time window: ${summary.days} days (${summary.sessions} sessions, ${summary.totalMinutes} total mins)", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        Text("• Swiping rate: ${summary.totalSwipes} swipes, avg %.1fs/video".format(summary.avgSecondsPerVideo), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        Text("• Engagement: ${summary.tapsPer100Swipes} taps/100 swipes", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        Text("• Bedtime habits: ${summary.lateNightPct}% late-night, ${summary.lyingPct}% lying down", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        Text("• Nudge response: ${summary.wentHome}/${summary.nudges} left feed", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                        if (summary.apps.isNotEmpty()) {
+                            Text("• App Telemetry Breakdown:", fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = Mint)
+                            summary.apps.forEach { app ->
+                                Text(
+                                    "  - ${app.app}: ${app.minutes}m, ${app.meters}m, ${app.sessions} ses, %.1fs/vid, %d%% late".format(app.avgSecondsPerVideo, app.lateNightPct),
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = Color.White.copy(alpha = 0.85f),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -259,9 +532,9 @@ private fun ChatCard(app: SnapOutApp, summary: UsageSummary, goal: String) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Ask about your scrolling", fontWeight = FontWeight.SemiBold)
             Text(
-                "Answers come from the on-device model using only the stats above. " +
-                    "Model: ${ai.modelName?.removeSuffix(".litertlm") ?: "none found (built-in rules answer)"}",
+                "Chat privately with your digital wellbeing coach about your feed habits and goals.",
                 fontSize = 12.sp,
+                color = Color.White.copy(alpha = 0.7f),
             )
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 SUGGESTIONS.forEach { q ->

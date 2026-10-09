@@ -58,14 +58,50 @@ fun HomeScreen(app: SnapOutApp, modifier: Modifier = Modifier) {
     val snap by app.engine.snapshot.collectAsState()
     val connected by app.engine.serviceConnected.collectAsState()
     val diag by app.engine.diagnostics.collectAsState()
-    val ai by app.llm.status.collectAsState()
+    val version by app.db.version.collectAsState()
+    val interventions = remember(version) { app.db.interventions(500) }
+    val sessions = remember(version) { app.db.sessions(500) }
+    val summary = remember(version) { com.assemblers.snapout.core.UsageSummary.from(sessions, interventions, System.currentTimeMillis()) }
+
+    var showDetails by remember { mutableStateOf(false) }
 
     Column(
         modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text("SnapOut", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+        Text("Attention Coach & Doomscroll Detector", fontSize = 13.sp, color = Color.White.copy(alpha = 0.6f))
 
+        Spacer(Modifier.height(4.dp))
+
+        // 1. Focus Score Gauge / Trance Meter at the very top
+        ScoreDial(snap.score, snap.state)
+
+        Text(
+            snap.feedPackage?.let { "Watching scroll rhythm on ${FeedApps.label(it)}" } ?: "Not currently scrolling in a feed app",
+            fontSize = 13.sp,
+            color = if (snap.feedPackage != null) Mint else Color.White.copy(alpha = 0.7f),
+        )
+
+        // 2. Monitoring switch card directly below the meter
+        Card(Modifier.fillMaxWidth()) {
+            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Monitoring", fontWeight = FontWeight.SemiBold)
+                    Text(
+                        if (connected && settings.enabled) "Active — watching for mindless scrolls"
+                        else if (!settings.enabled) "Monitoring paused"
+                        else "Service off — enable in Accessibility",
+                        fontSize = 13.sp,
+                        color = if (connected && settings.enabled) Mint else Coral,
+                    )
+                }
+                Switch(settings.enabled, onCheckedChange = { v -> app.settings.update { it.copy(enabled = v) } })
+            }
+        }
+
+        // 3. Followed by Goal Card (tied directly to on-device AI)
         if (!settings.onboarded) Onboarding(settings.goal) { goal ->
             app.settings.update { it.copy(goal = goal, onboarded = true) }
         } else GoalCard(settings.goal) { goal -> app.settings.update { it.copy(goal = goal) } }
@@ -74,9 +110,9 @@ fun HomeScreen(app: SnapOutApp, modifier: Modifier = Modifier) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Turn on scroll detection", fontWeight = FontWeight.SemiBold)
                 Text(
-                    "SnapOut uses Android's Accessibility API only to notice scroll timing in feed apps " +
-                        "(TikTok, Reels, Shorts…). It cannot read what's on your screen, and nothing leaves the phone.",
-                    fontSize = 14.sp,
+                    "SnapOut uses Android's Accessibility API only to measure scroll cadence and pauses " +
+                        "(TikTok, Reels, Shorts…). It cannot read what's on your screen, and nothing leaves your phone.",
+                    fontSize = 13.sp,
                 )
                 Button(onClick = { ctx.startActivity(Intent(AndroidSettings.ACTION_ACCESSIBILITY_SETTINGS)) }) {
                     Text("Open Accessibility settings")
@@ -84,20 +120,10 @@ fun HomeScreen(app: SnapOutApp, modifier: Modifier = Modifier) {
             }
         }
 
-        Card(Modifier.fillMaxWidth()) {
-            Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Column(Modifier.weight(1f)) {
-                    Text("Protection", fontWeight = FontWeight.SemiBold)
-                    Text(if (connected) "Service running" else "Service off", fontSize = 13.sp, color = if (connected) Mint else Coral)
-                }
-                Switch(settings.enabled, onCheckedChange = { v -> app.settings.update { it.copy(enabled = v) } })
-            }
-        }
-
         if (!NudgeNotifier.canPost(ctx)) Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Allow notifications", fontWeight = FontWeight.SemiBold)
-                Text("Nudges arrive as notifications. Without this permission you won't see them.", fontSize = 14.sp)
+                Text("Nudges arrive as gentle notifications. Without this permission you won't see them.", fontSize = 13.sp)
                 Button(onClick = {
                     ctx.startActivity(
                         Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(AndroidSettings.EXTRA_APP_PACKAGE, ctx.packageName),
@@ -106,94 +132,93 @@ fun HomeScreen(app: SnapOutApp, modifier: Modifier = Modifier) {
             }
         }
 
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                ScoreDial(snap.score, snap.state)
-                Text(
-                    snap.feedPackage?.let { "Watching scroll rhythm on ${FeedApps.label(it)}" } ?: "Not in a feed app",
-                    fontSize = 13.sp,
-                )
-                if (snap.feedPackage != null) {
+        // 4. Quick Stats Row (including Feed Mileage from ZombieThumb)
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            val liveMeters = if (snap.feedPackage != null && snap.sessionDistanceMeters > 0) {
+                summary.totalMeters + snap.sessionDistanceMeters.toInt()
+            } else {
+                summary.totalMeters
+            }
+            QuickStatCard(
+                modifier = Modifier.weight(1f),
+                value = "$liveMeters m",
+                label = "Feed mileage",
+                color = Mint,
+            )
+            QuickStatCard(
+                modifier = Modifier.weight(1f),
+                value = "${summary.totalMinutes} m",
+                label = "Feed time",
+                color = Amber,
+            )
+            QuickStatCard(
+                modifier = Modifier.weight(1f),
+                value = "${summary.totalSwipes}",
+                label = "Swipes",
+                color = Color(0xFF60A5FA),
+            )
+            QuickStatCard(
+                modifier = Modifier.weight(1f),
+                value = "${summary.nudges}",
+                label = "Nudges",
+                color = Coral,
+            )
+        }
+
+        // 5. Dropdown toggle for breakdown info
+        Card(
+            Modifier.fillMaxWidth().clickable { showDetails = !showDetails },
+        ) {
+            Column(Modifier.padding(14.dp)) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
                     Text(
-                        "%.1f swipes/min · dwell %.1fs · %.1f min · %d swipes".format(
-                            snap.swipesPerMinute, snap.medianDwellMs / 1000.0, snap.sessionMinutes, snap.sessionSwipes,
-                        ),
-                        fontSize = 12.sp, fontFamily = FontFamily.Monospace,
+                        if (showDetails) "Hide score breakdown" else "View score breakdown & physics",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Amber,
                     )
+                    Text(if (showDetails) "▲" else "▼", fontSize = 12.sp, color = Amber)
                 }
-                Spacer(Modifier.height(8.dp))
-                ScoreBreakdownList(snap.breakdown, settings.demoMode)
-            }
-        }
-
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text("On-device AI", fontWeight = FontWeight.SemiBold)
-                val (line, color) = when (ai.status) {
-                    EngineStatus.NO_MODEL -> "No model found. Copy a .litertlm file into the folder below, then tap Rescan (see SETUP.md)." to Coral
-                    EngineStatus.IDLE -> "${ai.modelName} · ready to load" to Amber
-                    EngineStatus.LOADING -> "Loading ${ai.modelName}…" to Amber
-                    EngineStatus.READY -> "${ai.modelName} · ${ai.backend} · loaded in ${ai.loadMs} ms" to Mint
-                    EngineStatus.ERROR -> "Failed: ${ai.error}" to Coral
-                }
-                Text(line, color = color, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
-                Text("Inference runs locally with LiteRT-LM. The app has no INTERNET permission.", fontSize = 12.sp)
-                val models = remember(ai) { app.llm.modelCandidates() }
-                if (models.size > 1) {
-                    Text("Model", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-                    models.forEach { f ->
-                        FilterChip(
-                            selected = f.name == ai.modelName,
-                            onClick = {
-                                app.settings.update { it.copy(modelFile = f.name) }
-                                app.llm.switchModel()
-                            },
-                            label = { Text("${f.name} · ${f.length() / 1_000_000} MB", fontSize = 12.sp) },
+                if (showDetails) {
+                    Spacer(Modifier.height(10.dp))
+                    if (snap.feedPackage != null) {
+                        Text(
+                            "%.1f swipes/min · dwell %.1fs · %.1f min · %d swipes".format(
+                                snap.swipesPerMinute, snap.medianDwellMs / 1000.0, snap.sessionMinutes, snap.sessionSwipes,
+                            ),
+                            fontSize = 12.sp, fontFamily = FontFamily.Monospace,
                         )
+                        Spacer(Modifier.height(8.dp))
                     }
+                    ScoreBreakdownList(snap.breakdown, settings.demoMode)
                 }
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { app.llm.warmUp() }, enabled = ai.status == EngineStatus.IDLE || ai.status == EngineStatus.ERROR) {
-                        Text("Load model now")
-                    }
-                    OutlinedButton(onClick = { app.llm.refreshModelPresence() }) { Text("Rescan") }
-                }
-                Text(
-                    "Model folder: ${app.llm.modelDir}",
-                    fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = Color.White.copy(alpha = 0.6f),
-                )
             }
         }
+    }
+}
 
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Nudge tone", fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Strictness.entries.forEach { s ->
-                        FilterChip(
-                            selected = settings.strictness == s,
-                            onClick = { app.settings.update { it.copy(strictness = s) } },
-                            label = { Text(s.name.lowercase().replaceFirstChar { c -> c.uppercase() }) },
-                        )
-                    }
-                }
-                Text("Gentle asks questions; Strict is more direct. Repeated nudges in one night get firmer.", fontSize = 12.sp)
-                ToggleRow("Read nudge aloud", settings.speak) { v -> app.settings.update { it.copy(speak = v) } }
-            }
-        }
-
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Demo", fontWeight = FontWeight.SemiBold)
-                ToggleRow("Demo mode (low thresholds, 5 s trigger)", settings.demoMode) { v -> app.settings.update { it.copy(demoMode = v) } }
-                ToggleRow("Pretend it's late & dark", settings.forceNight) { v -> app.settings.update { it.copy(forceNight = v) } }
-                Button(onClick = { app.engine.forceTrigger() }, enabled = connected) { Text("Send test nudge now") }
-                Text(
-                    "Raw events — scroll ${diag.scrollEvents} (feed apps ${diag.feedScrollEvents}) · click ${diag.clickEvents} · " +
-                        "window ${diag.windowEvents} · last ${diag.lastPackage ?: "-"}\nlast scroll ${diag.lastScroll ?: "-"}",
-                    fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = Color.White.copy(alpha = 0.6f),
-                )
-            }
+@Composable
+private fun QuickStatCard(
+    modifier: Modifier = Modifier,
+    value: String,
+    label: String,
+    color: Color,
+) {
+    Card(modifier) {
+        Column(
+            Modifier.padding(12.dp).fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(value, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = color)
+            Spacer(Modifier.height(2.dp))
+            Text(label, fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
         }
     }
 }

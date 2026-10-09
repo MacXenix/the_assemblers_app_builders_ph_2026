@@ -18,6 +18,7 @@ data class SettingsState(
     val insights: String = "",
     val insightsAt: Long = 0L,
     val insightsBy: String = "",
+    val enabledFeeds: Set<String> = com.assemblers.snapout.core.FeedApps.names.keys,
 )
 
 class Settings(context: Context) {
@@ -37,6 +38,7 @@ class Settings(context: Context) {
         insights = prefs.getString("insights", "")!!,
         insightsAt = prefs.getLong("insightsAt", 0L),
         insightsBy = prefs.getString("insightsBy", "")!!,
+        enabledFeeds = prefs.getStringSet("enabledFeeds", com.assemblers.snapout.core.FeedApps.names.keys) ?: com.assemblers.snapout.core.FeedApps.names.keys,
     )
 
     fun update(f: (SettingsState) -> SettingsState) {
@@ -53,6 +55,7 @@ class Settings(context: Context) {
             .putString("insights", s.insights)
             .putLong("insightsAt", s.insightsAt)
             .putString("insightsBy", s.insightsBy)
+            .putStringSet("enabledFeeds", s.enabledFeeds)
             .apply()
         _state.value = s
     }

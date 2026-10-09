@@ -44,6 +44,7 @@ class MainActivity : ComponentActivity() {
                             listOf(
                                 "Home" to R.drawable.ic_nav_home,
                                 "Insights" to R.drawable.ic_nav_history,
+                                "Settings" to R.drawable.ic_nav_settings,
                                 "Privacy" to R.drawable.ic_nav_privacy,
                             ).forEachIndexed { i, (label, icon) ->
                                 NavigationBarItem(
@@ -60,6 +61,7 @@ class MainActivity : ComponentActivity() {
                     when (tab) {
                         0 -> HomeScreen(app, m)
                         1 -> InsightsScreen(app, m)
+                        2 -> SettingsScreen(app, m)
                         else -> PrivacyScreen(app, m)
                     }
                 }

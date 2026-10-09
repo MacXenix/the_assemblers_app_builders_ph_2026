@@ -88,6 +88,7 @@ class LlmManager(private val context: Context, private val preferredModel: () ->
         context.getExternalFilesDir(null),
         File("/data/local/tmp/llm"),
     ).flatMap { dir -> dir.listFiles { f -> f.name.endsWith(".litertlm") }?.toList().orEmpty() }
+        .distinctBy { it.name }
 
     val modelDir: String get() = context.getExternalFilesDir(null)?.absolutePath ?: "?"
 
