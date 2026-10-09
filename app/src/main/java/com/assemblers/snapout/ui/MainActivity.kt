@@ -16,6 +16,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.painterResource
+import com.assemblers.snapout.R
 import com.assemblers.snapout.app
 import com.assemblers.snapout.ui.theme.SnapOutTheme
 
@@ -31,9 +32,9 @@ class MainActivity : ComponentActivity() {
                     bottomBar = {
                         NavigationBar {
                             listOf(
-                                "Home" to android.R.drawable.ic_menu_compass,
-                                "History" to android.R.drawable.ic_menu_recent_history,
-                                "Privacy" to android.R.drawable.ic_lock_lock,
+                                "Home" to R.drawable.ic_nav_home,
+                                "History" to R.drawable.ic_nav_history,
+                                "Privacy" to R.drawable.ic_nav_privacy,
                             ).forEachIndexed { i, (label, icon) ->
                                 NavigationBarItem(
                                     selected = tab == i,
