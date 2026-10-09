@@ -4,6 +4,8 @@
 
 SnapOut is an Android app that detects mindless short-form-video scrolling (TikTok, Reels, Shorts…) from *how* you scroll, and interrupts at that moment with a four-stage circuit breaker. The message is written by Gemma running locally via LiteRT-LM. The app has **no INTERNET permission**.
 
+> **New here? Start with [SETUP.md](SETUP.md)**: step-by-step install, copying the model, Accessibility, test checklist, what the score means, switching models, troubleshooting.
+
 ## How it works
 
 | Layer | What it does | Code |
@@ -27,7 +29,8 @@ adb install -r app/build/outputs/apk/release/app-release.apk
 ## Install the model (once)
 
 1. Download **Gemma 3 1B IT int4** in `.litertlm` format from the LiteRT Community on Hugging Face
-   (`litert-community/Gemma3-1B-IT`, file `gemma3-1b-it-int4.litertlm`, ~530 MB). Accept the Gemma license first.
+   (`litert-community/Gemma3-1B-IT`, file `gemma3-1b-it-int4.litertlm`, 584 MB). Accept the Gemma license first.
+   No-login alternative: `litert-community/Qwen3-0.6B`, file `qwen3_0_6b_mixed_int4.litertlm`. More options in [SETUP.md §9](SETUP.md#9-changing-the-model).
 2. Push it to the app's files dir (any `*.litertlm` filename works):
 
 ```bash

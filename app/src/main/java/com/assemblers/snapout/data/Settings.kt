@@ -14,6 +14,7 @@ data class SettingsState(
     val strictness: Strictness = Strictness.BALANCED,
     val goal: String = "",
     val onboarded: Boolean = false,
+    val modelFile: String = "",
 )
 
 class Settings(context: Context) {
@@ -29,6 +30,7 @@ class Settings(context: Context) {
         strictness = Strictness.valueOf(prefs.getString("strictness", Strictness.BALANCED.name)!!),
         goal = prefs.getString("goal", "")!!,
         onboarded = prefs.getBoolean("onboarded", false),
+        modelFile = prefs.getString("modelFile", "")!!,
     )
 
     fun update(f: (SettingsState) -> SettingsState) {
@@ -41,6 +43,7 @@ class Settings(context: Context) {
             .putString("strictness", s.strictness.name)
             .putString("goal", s.goal)
             .putBoolean("onboarded", s.onboarded)
+            .putString("modelFile", s.modelFile)
             .apply()
         _state.value = s
     }

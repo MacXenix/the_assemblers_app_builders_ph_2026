@@ -6,6 +6,11 @@ enum class TranceState(val label: String) {
     ZOMBIE("Zombie-scrolling"),
 }
 
+/** Metadata of one TYPE_VIEW_SCROLLED event. Indices are list positions (-1 if the app doesn't report them). */
+data class ScrollSignal(val dx: Int = 0, val dy: Int = 0, val fromIndex: Int = -1, val toIndex: Int = -1, val itemCount: Int = -1) {
+    val horizontalOnly get() = dx != 0 && dy == 0
+}
+
 enum class Strictness { GENTLE, BALANCED, STRICT }
 
 data class ScoreBreakdown(

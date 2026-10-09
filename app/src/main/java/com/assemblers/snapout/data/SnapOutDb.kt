@@ -107,7 +107,7 @@ class SnapOutDb(context: Context) : SQLiteOpenHelper(context, "snapout.db", null
         "SELECT COUNT(*) FROM intervention WHERE at >= ?", arrayOf(since.toString()),
     ).use { c -> if (c.moveToFirst()) c.getInt(0) else 0 }
 
-    fun recentTexts(n: Int): List<String> = interventions(n).map { it.text }.reversed()
+    fun recentTexts(n: Int): List<String> = interventions(n * 3).map { it.text }.filter { it.isNotBlank() }.take(n).reversed()
 
     fun rowCounts(): Pair<Int, Int> = sessions(100000).size to interventions(100000).size
 

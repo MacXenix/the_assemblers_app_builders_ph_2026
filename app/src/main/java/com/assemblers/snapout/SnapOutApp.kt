@@ -17,7 +17,7 @@ class SnapOutApp : Application() {
         super.onCreate()
         settings = Settings(this)
         db = SnapOutDb(this)
-        llm = LlmManager(this)
+        llm = LlmManager(this) { settings.state.value.modelFile }
         engine = TranceEngine(this, settings, db, llm)
         llm.refreshModelPresence()
     }

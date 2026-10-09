@@ -11,6 +11,8 @@ class TranceScorer(var config: ScorerConfig = ScorerConfig.NORMAL) {
     private val swipes = ArrayDeque<Long>()
     private val taps = ArrayDeque<Long>()
     private var lastScrollEventAt = 0L
+    private var lastSwipeAt = 0L
+    private var lastItemIndex = -1
 
     var sessionStart: Long? = null
         private set
@@ -25,6 +27,8 @@ class TranceScorer(var config: ScorerConfig = ScorerConfig.NORMAL) {
         swipes.clear()
         taps.clear()
         lastScrollEventAt = 0
+        lastSwipeAt = 0
+        lastItemIndex = -1
     }
 
     fun endSession() {
@@ -33,15 +37,24 @@ class TranceScorer(var config: ScorerConfig = ScorerConfig.NORMAL) {
         taps.clear()
     }
 
-    /** Scroll events arrive in bursts during one fling; a gap > [SWIPE_GAP_MS] starts a new swipe. */
-    fun onScroll(now: Long, deltaPx: Int) {
+    /**
+     * Scroll events arrive in bursts during one fling; a gap > [SWIPE_GAP_MS] starts a new swipe.
+     * Apps that keep emitting events (e.g. YouTube) also report list positions, so moving to a new
+     * item counts as a swipe too, at most once per [MIN_ITEM_SWIPE_MS].
+     */
+    fun onScroll(now: Long, deltaPx: Int, itemIndex: Int = -1) {
         if (sessionStart == null) startSession(now)
-        if (now - lastScrollEventAt > SWIPE_GAP_MS) {
+        val afterGap = now - lastScrollEventAt > SWIPE_GAP_MS
+        val newItem = itemIndex >= 0 && lastItemIndex >= 0 && itemIndex != lastItemIndex &&
+            now - lastSwipeAt > MIN_ITEM_SWIPE_MS
+        if (afterGap || newItem) {
             swipes.addLast(now)
             sessionSwipes++
+            lastSwipeAt = now
         }
         lastScrollEventAt = now
-        if (deltaPx > 0) sessionDistancePx += abs(deltaPx)
+        if (itemIndex >= 0) lastItemIndex = itemIndex
+        sessionDistancePx += abs(deltaPx)
     }
 
     fun onTap(now: Long) {
@@ -113,6 +126,7 @@ class TranceScorer(var config: ScorerConfig = ScorerConfig.NORMAL) {
     companion object {
         const val WINDOW_MS = 60_000L
         const val SWIPE_GAP_MS = 350L
+        const val MIN_ITEM_SWIPE_MS = 700L
         const val DARK_LUX = 10f
 
         fun stateFor(score: Int) = when {
