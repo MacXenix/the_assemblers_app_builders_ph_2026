@@ -92,18 +92,27 @@ class LlmManager(private val context: Context, private val preferredModel: () ->
 
     val modelDir: String get() = context.getExternalFilesDir(null)?.absolutePath ?: "?"
 
-    /** The model picked on Home, else the smallest one found. */
-    fun findModel(): File? = modelCandidates().let { all ->
-        all.firstOrNull { it.name == preferredModel() } ?: all.minByOrNull { it.length() }
+    /** The model picked in settings, else the smallest one found. If set to "none", no model is used. */
+    fun findModel(): File? {
+        val pref = preferredModel()
+        if (pref == "none") return null
+        return modelCandidates().let { all ->
+            all.firstOrNull { it.name == pref } ?: all.minByOrNull { it.length() }
+        }
     }
 
-    /** Unload the current model so the next generation loads the newly selected one. */
+    /** Unload the current model so the next generation loads the newly selected one or unloads. */
     fun switchModel() {
         release()
     }
 
     fun refreshModelPresence() {
         if (engine == null && _status.value.status != EngineStatus.LOADING) {
+            val pref = preferredModel()
+            if (pref == "none") {
+                _status.value = AiStatus(EngineStatus.NO_MODEL, modelName = "None (AI Disabled)")
+                return
+            }
             val m = findModel()
             _status.value = if (m == null) AiStatus(EngineStatus.NO_MODEL) else AiStatus(EngineStatus.IDLE, m.name)
         }

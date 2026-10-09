@@ -1,5 +1,6 @@
 package com.assemblers.snapout.ui
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.PaddingValues
@@ -94,35 +95,50 @@ fun InsightsScreen(app: SnapOutApp, modifier: Modifier = Modifier) {
             Card(Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Local AI Model", fontWeight = FontWeight.SemiBold)
-                    val (line, color) = when (ai.status) {
-                        EngineStatus.NO_MODEL -> "No model loaded. Place .litertlm file in app storage." to Coral
-                        EngineStatus.IDLE -> "${ai.modelName} · ready to load" to Amber
-                        EngineStatus.LOADING -> "Loading ${ai.modelName}…" to Amber
-                        EngineStatus.READY -> "${ai.modelName} · ${ai.backend} · loaded in ${ai.loadMs} ms" to Mint
-                        EngineStatus.ERROR -> "Error: ${ai.error}" to Coral
+                    val (line, color) = when {
+                        settings.modelFile == "none" -> "No AI Model selected (Rule-based engine only)" to Amber
+                        ai.status == EngineStatus.NO_MODEL -> "No model loaded. Place .litertlm file in app storage." to Coral
+                        ai.status == EngineStatus.IDLE -> "${ai.modelName} · ready to load" to Amber
+                        ai.status == EngineStatus.LOADING -> "Loading ${ai.modelName}…" to Amber
+                        ai.status == EngineStatus.READY -> "${ai.modelName} · ${ai.backend} · loaded in ${ai.loadMs} ms" to Mint
+                        ai.status == EngineStatus.ERROR -> "Error: ${ai.error}" to Coral
+                        else -> "Idle" to Amber
                     }
                     Text(line, color = color, fontSize = 13.sp, fontFamily = FontFamily.Monospace)
-                    Text("100% private on-device LLM (LiteRT-LM). Zero network access.", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
+                    Text("100% private on-device LLM (LiteRT-LM). Select 'No Model' to compare with rule-based heuristics.", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
 
                     val models = remember(ai) { app.llm.modelCandidates() }
-                    if (models.size > 1) {
-                        Text("Available models:", fontSize = 12.sp, fontWeight = FontWeight.Medium)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            models.forEach { f ->
-                                FilterChip(
-                                    selected = f.name == ai.modelName,
-                                    onClick = {
-                                        app.settings.update { it.copy(modelFile = f.name) }
-                                        app.llm.switchModel()
-                                    },
-                                    label = { Text("${f.name.removeSuffix(".litertlm")} (${f.length() / 1_000_000} MB)", fontSize = 11.sp) },
-                                )
-                            }
+                    Text("Select Model / Mode:", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        // Option to disable AI model and use rules only
+                        FilterChip(
+                            selected = settings.modelFile == "none",
+                            onClick = {
+                                app.settings.update { it.copy(modelFile = "none") }
+                                app.llm.switchModel()
+                            },
+                            label = { Text("No Model (Rules)", fontSize = 11.sp) },
+                        )
+                        models.forEach { f ->
+                            FilterChip(
+                                selected = settings.modelFile != "none" && (settings.modelFile == f.name || (settings.modelFile.isBlank() && f.name == ai.modelName)),
+                                onClick = {
+                                    app.settings.update { it.copy(modelFile = f.name) }
+                                    app.llm.switchModel()
+                                },
+                                label = { Text("${f.name.removeSuffix(".litertlm")} (${f.length() / 1_000_000} MB)", fontSize = 11.sp) },
+                            )
                         }
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = { app.llm.warmUp() }, enabled = ai.status == EngineStatus.IDLE || ai.status == EngineStatus.ERROR) {
+                        OutlinedButton(
+                            onClick = { app.llm.warmUp() },
+                            enabled = settings.modelFile != "none" && (ai.status == EngineStatus.IDLE || ai.status == EngineStatus.ERROR),
+                        ) {
                             Text("Load model now")
                         }
                         OutlinedButton(onClick = { app.llm.refreshModelPresence() }) { Text("Rescan") }
@@ -396,6 +412,53 @@ private fun StatsCard(
                 Stat(targetSummary.peakHour?.let { "%02d:00".format(it) } ?: "—", "peak hour", Modifier.weight(1f))
             }
 
+            // 24-Hour Activity Distribution Chart
+            Text("24-Hour Activity Timeline", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            val hourly = targetSummary.hourlyMinutes
+            val maxHourMin = remember(hourly) { (hourly.values.maxOrNull() ?: 1).coerceAtLeast(1) }
+            Column(
+                Modifier.fillMaxWidth()
+                    .background(Color.Black.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
+                    .padding(10.dp),
+            ) {
+                Row(
+                    Modifier.fillMaxWidth().height(65.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.Bottom,
+                ) {
+                    (0..23).forEach { h ->
+                        val m = hourly[h] ?: 0
+                        val barFraction = (m.toFloat() / maxHourMin).coerceIn(0.06f, 1f)
+                        val barColor = when (h) {
+                            in 0..4, in 22..23 -> Coral  // Late night
+                            in 5..11 -> Mint             // Morning
+                            in 12..16 -> Color(0xFF60A5FA)// Afternoon
+                            else -> Amber                // Evening
+                        }
+                        val isPeak = h == targetSummary.peakHour && m > 0
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier.weight(1f).padding(horizontal = 1.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height((50 * barFraction).dp)
+                                    .background(if (isPeak) Amber else barColor.copy(alpha = if (m > 0) 0.9f else 0.15f), RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)),
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(4.dp))
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("00:00", fontSize = 10.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
+                    Text("06:00", fontSize = 10.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
+                    Text("12:00", fontSize = 10.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
+                    Text("18:00", fontSize = 10.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
+                    Text("23:00", fontSize = 10.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
+                }
+            }
+
             // Bar Breakdown per App
             Text("Feed Time Breakdown", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
             overall.apps.forEachIndexed { idx, a ->
@@ -471,8 +534,8 @@ private fun AnalysisCard(
                 }
             }
             if (items.isNotEmpty()) Text(
-                (if (by == "rules") "Rule-based (no model available)" else "Analyzed by $by · on-device") + " · ${fmt.format(Date(at))}",
-                fontSize = 11.sp, color = Color.Gray,
+                (if (by == "rules" || by == "none") "Deterministic Heuristics (Rule-based engine)" else "Analyzed by $by · on-device") + " · ${fmt.format(Date(at))}",
+                fontSize = 11.sp, color = if (by == "rules" || by == "none") Amber else Color.Gray,
             )
             Text(
                 if (showInput) "Hide formatted model input ▲" else "Inspect formatted input seen by AI ▼",
@@ -543,7 +606,19 @@ private fun ChatCard(app: SnapOutApp, summary: UsageSummary, goal: String) {
                     }
                 }
             }
-            chat.forEach { m -> Bubble(m.fromUser, m.text, m.by) }
+            var showAllChat by remember { mutableStateOf(false) }
+            val visibleChat = if (showAllChat || chat.size <= 4) chat else chat.takeLast(4)
+
+            if (chat.size > 4) {
+                Text(
+                    if (showAllChat) "Collapse earlier messages ▲" else "Show earlier messages (${chat.size - 4}) ▼",
+                    fontSize = 12.sp,
+                    color = Amber,
+                    modifier = Modifier.clickable { showAllChat = !showAllChat },
+                )
+            }
+
+            visibleChat.forEach { m -> Bubble(m.fromUser, m.text, m.by) }
             typing?.let { t ->
                 Bubble(false, t.ifBlank { "Thinking on-device…" }, "")
                 LinearProgressIndicator(Modifier.fillMaxWidth(), color = Amber)

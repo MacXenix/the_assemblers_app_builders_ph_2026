@@ -16,6 +16,7 @@ data class AppUsage(
     val tapsPer100Swipes: Int = 0,
     val longestSessionMinutes: Int = 0,
     val lateNightPct: Int = 0,
+    val peakHour: Int? = null,
 )
 
 /** Aggregated feed analytics over the last [days] days. This (not raw events) is what the local model analyses. */
@@ -34,6 +35,7 @@ data class UsageSummary(
     val darkPct: Int = 0,
     val lyingPct: Int = 0,
     val peakHour: Int? = null,
+    val hourlyMinutes: Map<Int, Int> = emptyMap(),
     val apps: List<AppUsage> = emptyList(),
     val nudges: Int = 0,
     val wentHome: Int = 0,
@@ -44,13 +46,14 @@ data class UsageSummary(
 
     fun toJson(): String {
         val appsJson = apps.joinToString(",") {
-            """{"app":"${it.app}","sessions":${it.sessions},"minutes":${it.minutes},"swipes":${it.swipes},"meters":${it.meters},"avg_seconds_per_video":${fmt(it.avgSecondsPerVideo)},"taps_per_100_swipes":${it.tapsPer100Swipes},"longest_session_min":${it.longestSessionMinutes},"late_night_pct":${it.lateNightPct}}"""
+            """{"app":"${it.app}","sessions":${it.sessions},"minutes":${it.minutes},"swipes":${it.swipes},"meters":${it.meters},"avg_seconds_per_video":${fmt(it.avgSecondsPerVideo)},"taps_per_100_swipes":${it.tapsPer100Swipes},"longest_session_min":${it.longestSessionMinutes},"late_night_pct":${it.lateNightPct},"peak_hour":${it.peakHour?.let { h -> "\"%02d:00\"".format(h) } ?: "null"}}"""
         }
+        val hourlyJson = hourlyMinutes.entries.sortedBy { it.key }.joinToString(",") { "\"${it.key}\":${it.value}" }
         return """{"days":$days,"sessions":$sessions,"total_minutes":$totalMinutes,"total_meters":$totalMeters,"minutes_per_day":$minutesPerDay,""" +
             """"total_swipes":$totalSwipes,"avg_seconds_per_video":${fmt(avgSecondsPerVideo)},"taps_per_100_swipes":$tapsPer100Swipes,""" +
             """"avg_session_minutes":$avgSessionMinutes,"longest_session_minutes":$longestSessionMinutes,""" +
             """"late_night_pct":$lateNightPct,"dark_room_pct":$darkPct,"lying_down_pct":$lyingPct,""" +
-            """"peak_hour":${peakHour?.let { "\"%02d:00\"".format(it) } ?: "null"},"apps":[$appsJson],""" +
+            """"peak_hour":${peakHour?.let { "\"%02d:00\"".format(it) } ?: "null"},"hourly_minutes":{$hourlyJson},"apps":[$appsJson],""" +
             """"nudges":$nudges,"nudges_went_home":$wentHome,"nudges_snoozed":$snoozed,"nudges_ignored":$ignored}"""
     }
 
@@ -95,6 +98,10 @@ data class UsageSummary(
                 val appLongestMin = if (appMinutes.isEmpty()) 0 else appMinutes.max().roundToInt()
                 val appLatePct = if (appTotalMin <= 0) 0 else (100 * appSessions.indices.filter { appSessions[it].late }.sumOf { appMinutes[it] } / appTotalMin).roundToInt()
 
+                val appByHour = appSessions.indices.groupBy { cal.apply { timeInMillis = appSessions[it].startedAt }.get(Calendar.HOUR_OF_DAY) }
+                    .mapValues { (_, sIdx) -> sIdx.sumOf { appMinutes[it] } }
+                val appPeakHour = appByHour.maxByOrNull { it.value }?.key
+
                 AppUsage(
                     app = app,
                     sessions = idx.size,
@@ -105,9 +112,11 @@ data class UsageSummary(
                     tapsPer100Swipes = appTapsPer100,
                     longestSessionMinutes = appLongestMin,
                     lateNightPct = appLatePct,
+                    peakHour = appPeakHour,
                 )
             }.sortedByDescending { it.minutes }
             val ns = interventions.filter { it.at >= since }
+            val hourlyMap = (0..23).associateWith { h -> (byHour[h] ?: 0.0).roundToInt() }
             return UsageSummary(
                 days = days,
                 sessions = ss.size,
@@ -123,6 +132,7 @@ data class UsageSummary(
                 darkPct = pct { it.dark },
                 lyingPct = pct { it.lying },
                 peakHour = byHour.maxByOrNull { it.value }?.key,
+                hourlyMinutes = hourlyMap,
                 apps = apps,
                 nudges = ns.size,
                 wentHome = ns.count { it.outcome == "went_home" },

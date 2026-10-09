@@ -1,5 +1,6 @@
 package com.assemblers.snapout.ui
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -114,6 +116,44 @@ fun SettingsScreen(app: SnapOutApp, modifier: Modifier = Modifier) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("Read nudge aloud (Speech synthesis)", Modifier.weight(1f), fontSize = 14.sp)
                     Switch(settings.speak, onCheckedChange = { v -> app.settings.update { it.copy(speak = v) } })
+                }
+            }
+        }
+
+        // On-Device AI Engine Selection
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("On-Device AI Engine", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "SnapOut uses LiteRT-LM to generate personalized somatic reframes and analyze dashboards 100% offline. " +
+                        "Choose 'No Model (Rules Only)' to test deterministic rule-based analysis and fallback nudges.",
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.7f),
+                )
+
+                val models = remember { app.llm.modelCandidates() }
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilterChip(
+                        selected = settings.modelFile == "none",
+                        onClick = {
+                            app.settings.update { it.copy(modelFile = "none") }
+                            app.llm.switchModel()
+                        },
+                        label = { Text("No Model (Rules Only)", fontSize = 12.sp) },
+                    )
+                    models.forEach { f ->
+                        FilterChip(
+                            selected = settings.modelFile != "none" && (settings.modelFile == f.name || (settings.modelFile.isBlank() && f.name == app.llm.status.value.modelName)),
+                            onClick = {
+                                app.settings.update { it.copy(modelFile = f.name) }
+                                app.llm.switchModel()
+                            },
+                            label = { Text(f.name.removeSuffix(".litertlm"), fontSize = 12.sp) },
+                        )
+                    }
                 }
             }
         }
