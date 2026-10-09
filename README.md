@@ -13,8 +13,9 @@ SnapOut is an Android app that detects mindless short-form-video scrolling (TikT
 | Accessibility service | Receives only `TYPE_VIEW_SCROLLED`, `TYPE_VIEW_CLICKED`, `TYPE_WINDOW_STATE_CHANGED` (package name, timestamp, scroll delta). `canRetrieveWindowContent=false` — it cannot read the screen. | `service/SnapOutAccessibilityService.kt` |
 | Trance score (deterministic) | 0–100 from swipe rate, dwell time, session length, tap ratio, darkness × late night, lying-down posture. ≥80 for 30 s → intervene. **The AI never decides when to intervene.** | `core/TranceScorer.kt` |
 | Sensors | Ambient light + gravity, only while a feed is open | `service/SensorMonitor.kt` |
-| Overlay | `TYPE_ACCESSIBILITY_OVERLAY` (no `SYSTEM_ALERT_WINDOW`): stats → Gemma reframe → 10 s breathing → “take me out” or hold-to-continue | `service/InterventionOverlay.kt`, `ui/InterventionScreen.kt` |
-| Local AI | Gemma 3 1B (int4) on LiteRT-LM, GPU with CPU fallback. Warmed up and pre-generated when you start Drifting; streams into the overlay; built-in messages if the model is missing. | `ai/LlmManager.kt`, `ai/PromptBuilder.kt` |
+| Nudge | Heads-up notification (no screen block): stats title + a message the local model writes from the current parameters (swipe rate, seconds per video, taps, session length, time, posture, goal). Buttons: **Take me out** (goes Home) / **Snooze 15 min**. | `service/NudgeNotifier.kt` |
+| Insights | 7-day analytics from the local DB (minutes/day, per app, seconds per video, taps per 100 swipes, late-night %, lying-down %, peak hour, nudge outcomes). **Analyze my scrolling** has the local model turn them into 3 insights + 3 tips; rule-based if no model. | `core/UsageSummary.kt`, `ui/InsightsScreen.kt` |
+| Local AI | Gemma 3 1B (int4) on LiteRT-LM, GPU with CPU fallback. Warmed up when you start Drifting; built-in messages if the model is missing. | `ai/LlmManager.kt`, `ai/PromptBuilder.kt` |
 | Storage | SQLite on device: feed sessions + interventions. Purge from Privacy tab. | `data/SnapOutDb.kt` |
 
 ## Build & install
@@ -48,9 +49,9 @@ Home → **Open Accessibility settings** → *SnapOut scroll detection* → On. 
 
 1. Turn on **airplane mode**.
 2. Home → enable **Demo mode** (low thresholds, 5 s trigger) and optionally **Pretend it's late & dark**.
-3. Load the model, open TikTok/Shorts, swipe quickly for ~1 min → overlay appears by itself.
-   Backup: **Trigger intervention now** button.
-4. Tap the AI panel in the overlay to show the exact context Gemma saw, first-token latency, tokens/s.
+3. Load the model, open TikTok/Shorts, swipe quickly for ~1 min → a nudge notification pops up by itself.
+   Backup: **Send test nudge now** button.
+4. The notification's subtext shows which model wrote it and how fast. Insights tab → **Analyze my scrolling** (use **Load sample week** on a fresh install) → **What the model sees** shows the exact numbers it got.
 5. Privacy tab → “✓ No network permission” + purge. Proof from a laptop:
    `$ANDROID_HOME/cmdline-tools/latest/bin/apkanalyzer manifest permissions app-release.apk`
 

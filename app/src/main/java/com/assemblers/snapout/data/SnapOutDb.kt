@@ -17,6 +17,11 @@ data class FeedSession(
     val distanceMeters: Double,
     val peakScore: Int,
     val intervened: Boolean,
+    val taps: Int = 0,
+    val avgDwellMs: Long = 0,
+    val late: Boolean = false,
+    val dark: Boolean = false,
+    val lying: Boolean = false,
 )
 
 data class Intervention(
@@ -31,7 +36,7 @@ data class Intervention(
 )
 
 /** 100% local history. No sync, no network. */
-class SnapOutDb(context: Context) : SQLiteOpenHelper(context, "snapout.db", null, 1) {
+class SnapOutDb(context: Context) : SQLiteOpenHelper(context, "snapout.db", null, 2) {
 
     private val _version = MutableStateFlow(0)
     /** Bumped on every write so the UI can re-query. */
@@ -42,19 +47,30 @@ class SnapOutDb(context: Context) : SQLiteOpenHelper(context, "snapout.db", null
             "CREATE TABLE feed_session(id INTEGER PRIMARY KEY AUTOINCREMENT, started_at INTEGER, ended_at INTEGER, " +
                 "app TEXT, swipes INTEGER, distance_m REAL, peak_score INTEGER, intervened INTEGER)",
         )
+        addV2Columns(db)
         db.execSQL(
             "CREATE TABLE intervention(id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER, app TEXT, score INTEGER, " +
                 "source TEXT, ttft_ms INTEGER, text TEXT, outcome TEXT)",
         )
     }
 
-    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+    override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
+        if (oldVersion < 2) addV2Columns(db)
+    }
+
+    private fun addV2Columns(db: SQLiteDatabase) {
+        listOf("taps INTEGER", "dwell_ms INTEGER", "late INTEGER", "dark INTEGER", "lying INTEGER").forEach {
+            db.execSQL("ALTER TABLE feed_session ADD COLUMN $it DEFAULT 0")
+        }
+    }
 
     fun insertSession(s: FeedSession) {
         writableDatabase.insert("feed_session", null, ContentValues().apply {
             put("started_at", s.startedAt); put("ended_at", s.endedAt); put("app", s.app)
             put("swipes", s.swipes); put("distance_m", s.distanceMeters); put("peak_score", s.peakScore)
             put("intervened", if (s.intervened) 1 else 0)
+            put("taps", s.taps); put("dwell_ms", s.avgDwellMs)
+            put("late", if (s.late) 1 else 0); put("dark", if (s.dark) 1 else 0); put("lying", if (s.lying) 1 else 0)
         })
         _version.value++
     }
@@ -68,29 +84,40 @@ class SnapOutDb(context: Context) : SQLiteOpenHelper(context, "snapout.db", null
         return id
     }
 
-    fun setOutcome(id: Long, outcome: String, text: String?, source: String?, ttftMs: Long?) {
+    fun setOutcome(id: Long, outcome: String) {
+        writableDatabase.update("intervention", ContentValues().apply { put("outcome", outcome) }, "id=?", arrayOf(id.toString()))
+        _version.value++
+    }
+
+    fun updateMessage(id: Long, text: String, source: String, ttftMs: Long?) {
         writableDatabase.update("intervention", ContentValues().apply {
-            put("outcome", outcome)
-            text?.let { put("text", it) }
-            source?.let { put("source", it) }
-            ttftMs?.let { put("ttft_ms", it) }
+            put("text", text); put("source", source); ttftMs?.let { put("ttft_ms", it) }
         }, "id=?", arrayOf(id.toString()))
         _version.value++
     }
 
+    fun insertSample(sessions: List<FeedSession>, interventions: List<Intervention>) {
+        sessions.forEach { insertSession(it) }
+        interventions.forEach { insertIntervention(it) }
+    }
+
     fun sessions(limit: Int = 100): List<FeedSession> = readableDatabase.rawQuery(
-        "SELECT id, started_at, ended_at, app, swipes, distance_m, peak_score, intervened FROM feed_session ORDER BY id DESC LIMIT $limit",
+        "SELECT id, started_at, ended_at, app, swipes, distance_m, peak_score, intervened, taps, dwell_ms, late, dark, lying " +
+            "FROM feed_session ORDER BY started_at DESC LIMIT $limit",
         null,
     ).use { c ->
         buildList {
             while (c.moveToNext()) add(
-                FeedSession(c.getLong(0), c.getLong(1), c.getLong(2), c.getString(3), c.getInt(4), c.getDouble(5), c.getInt(6), c.getInt(7) == 1),
+                FeedSession(
+                    c.getLong(0), c.getLong(1), c.getLong(2), c.getString(3), c.getInt(4), c.getDouble(5), c.getInt(6), c.getInt(7) == 1,
+                    c.getInt(8), c.getLong(9), c.getInt(10) == 1, c.getInt(11) == 1, c.getInt(12) == 1,
+                ),
             )
         }
     }
 
     fun interventions(limit: Int = 100): List<Intervention> = readableDatabase.rawQuery(
-        "SELECT id, at, app, score, source, ttft_ms, text, outcome FROM intervention ORDER BY id DESC LIMIT $limit",
+        "SELECT id, at, app, score, source, ttft_ms, text, outcome FROM intervention ORDER BY at DESC LIMIT $limit",
         null,
     ).use { c ->
         buildList {

@@ -48,7 +48,6 @@ class TranceEngine(
     val serviceConnected: StateFlow<Boolean> = _serviceConnected.asStateFlow()
 
     var onTrigger: ((TranceSnapshot) -> Unit)? = null
-    var overlayShowing = false
 
     private var feedPackage: String? = null
     private var leftFeedAt: Long? = null
@@ -57,6 +56,10 @@ class TranceEngine(
     private var peakScore = 0
     private var intervenedThisSession = false
     private var warmed = false
+    private var ticks = 0
+    private var darkTicks = 0
+    private var lyingTicks = 0
+    private var sessionLate = false
 
     private val config get() = if (settings.state.value.demoMode) ScorerConfig.DEMO else ScorerConfig.NORMAL
 
@@ -111,11 +114,16 @@ class TranceEngine(
         )
         _snapshot.value = snap
         peakScore = maxOf(peakScore, snap.score)
+        if (snap.feedPackage != null) {
+            ticks++
+            if (snap.isDark) darkTicks++
+            if (snap.lyingDown) lyingTicks++
+            if (snap.isLate) sessionLate = true
+        }
 
         if (snap.state >= TranceState.DRIFTING && !warmed) {
             warmed = true
             llm.warmUp()
-            llm.pregenerate(buildContext(snap))
         }
         if (snap.state == TranceState.ZOMBIE) {
             if (zombieSince == null) zombieSince = now
@@ -123,7 +131,7 @@ class TranceEngine(
             zombieSince = null
         }
         val since = zombieSince
-        if (s.enabled && since != null && now - since >= config.zombieHoldMs && now >= cooldownUntil && !overlayShowing) {
+        if (s.enabled && since != null && now - since >= config.zombieHoldMs && now >= cooldownUntil) {
             fire(snap)
         }
     }
@@ -144,13 +152,14 @@ class TranceEngine(
     private fun fire(snap: TranceSnapshot) {
         zombieSince = null
         intervenedThisSession = true
+        warmed = false
+        cooldownUntil = System.currentTimeMillis() + config.cooldownMs
         onTrigger?.invoke(snap)
     }
 
-    fun onInterventionClosed(continued: Boolean) {
-        overlayShowing = false
-        cooldownUntil = System.currentTimeMillis() + if (continued) config.cooldownMs else config.cooldownMs / 2
-        warmed = false
+    /** No automatic nudges for [ms] (notification "Snooze" / after "Take me out"). */
+    fun snooze(ms: Long) {
+        cooldownUntil = System.currentTimeMillis() + ms
     }
 
     fun buildContext(snap: TranceSnapshot): ReframeContext {
@@ -174,7 +183,11 @@ class TranceEngine(
         val snap = _snapshot.value
         if (start != null && scorer.sessionSwipes > 0) {
             db.insertSession(
-                FeedSession(0, start, now, FeedApps.label(pkg), scorer.sessionSwipes, snap.sessionDistanceMeters, peakScore, intervenedThisSession),
+                FeedSession(
+                    0, start, now, FeedApps.label(pkg), scorer.sessionSwipes, snap.sessionDistanceMeters, peakScore, intervenedThisSession,
+                    taps = scorer.sessionTaps, avgDwellMs = scorer.sessionAvgDwellMs, late = sessionLate,
+                    dark = darkTicks * 2 > ticks, lying = lyingTicks * 2 > ticks,
+                ),
             )
         }
         feedPackage = null
@@ -183,6 +196,10 @@ class TranceEngine(
         peakScore = 0
         intervenedThisSession = false
         warmed = false
+        ticks = 0
+        darkTicks = 0
+        lyingTicks = 0
+        sessionLate = false
         scorer.endSession()
         sensors.stop()
         _snapshot.value = TranceSnapshot()

@@ -26,7 +26,7 @@ This guide takes you from nothing to a working demo on an Android phone (Android
 | Windows/Mac/Linux PC | copying the model, building from source |
 | Hugging Face account (free) | Gemma models only; some models need no account |
 
-The app works **without a model**. It then shows built-in messages (labelled "Built-in message" in the pop-up). The model only makes the messages personal.
+The app works **without a model**. It then shows built-in messages (the notification says "built-in message"). The model only makes the messages personal.
 
 ## 2. Get the app
 
@@ -128,15 +128,16 @@ This replaces any other accessibility services you had enabled.
 |---|---|---|
 | 1 | Save a goal, e.g. *be asleep by midnight*. Later: **Edit goal** | Goal shown in the "Your goal" card |
 | 2 | Home → On-device AI → **Load model now** | Model name · GPU/CPU · load time |
-| 3 | Turn on **Demo mode**, tap **Trigger intervention now** | Pop-up: stats → message → 10 s breathing → buttons |
-| 4 | Tap the grey AI panel in the pop-up | Exact context the model saw (time, app, minutes, goal, angle…) |
-| 5 | Trigger 3 times | Different messages each time; tone gets firmer |
-| 6 | **I'm done — take me out** | Goes to the home screen |
-| 7 | Trigger again, hold **Hold 3.0s to keep scrolling** | Must hold the full time; letting go early resets it |
-| 8 | Open TikTok/YouTube/Instagram, swipe every 2–3 s for ~1 min (Demo mode on) | Score on Home rises; pop-up appears by itself |
-| 9 | History tab | Each pop-up: message, source (model or built-in), outcome |
+| 3 | Turn on **Demo mode**, tap **Send test nudge now** | Notification: "N swipes · M min on App" + a message; subtext says which model wrote it (or "built-in message") |
+| 4 | Send 3 test nudges | Different messages each time, based on the numbers; tone gets firmer |
+| 5 | Pull down the notification, tap **Take me out** | Goes to the home screen |
+| 6 | Tap **Snooze 15 min** on another nudge | No automatic nudges for 15 min |
+| 7 | Allow notifications if Home shows "Allow notifications" | Without it nudges are invisible |
+| 8 | Open TikTok/YouTube/Instagram, swipe every 2–3 s for ~1 min (Demo mode on) | Score on Home rises; nudge appears by itself |
+| 9 | Insights tab | Stats for the last 7 days, nudges (with what you did), feed sessions. Fresh install: **Load sample week (demo)** |
+| 9b | Insights → **Analyze my scrolling** | 3 "Seen" lines + 3 "Tip" lines by the local model (can take ~10–60 s; minutes on an emulator). No model → rule-based |
 | 10 | Airplane mode on, repeat 3 & 8 | Still works, because everything is on-device |
-| 11 | Privacy tab | "✓ No network permission"; **Purge** empties History |
+| 11 | Privacy tab | "✓ No network permission"; **Purge** empties Insights |
 
 Without Demo mode the real thresholds apply: score ≥ 80 held for 30 s, then a 10-minute cooldown.
 
@@ -153,7 +154,7 @@ The score (0–100) is a fixed formula, not AI. The AI only writes the message. 
 | Dark + late | 15 | bright room, daytime | light < 10 lux **and** 22:00–05:00 (one of the two = half) |
 | Lying down | 10 | phone held upright | phone held flat/overhead, like in bed |
 
-- **0–49 Focused · 50–79 Drifting** (the model starts loading in the background) **· 80+ Zombie-scrolling** (held for 30 s, the pop-up appears).
+- **0–49 Focused · 50–79 Drifting** (the model starts loading in the background) **· 80+ Zombie-scrolling** (held for 30 s, a nudge notification appears).
 - **Demo mode** ignores Dark + late and Lying down, and scales the four behaviour rows up to 100, so it can trigger in a bright room during the day.
 - **Pretend it's late & dark** forces Dark + late and Lying down to full (normal mode only).
 - **Raw events** (bottom of Home) is for debugging: how many scroll events arrived in total and from feed apps, plus the last one (`dy` = scroll distance, `item` = which list position is on screen).
@@ -187,7 +188,7 @@ Use the generic file from each repo, not the ones named after a chip.
 | What | Location |
 |---|---|
 | Models | `/sdcard/Android/data/com.assemblers.snapout/files/` (also scanned: `/data/local/tmp/llm/`) |
-| Database (sessions, interventions) | `/data/data/com.assemblers.snapout/databases/snapout.db` (private; use the History tab, or `adb shell run-as com.assemblers.snapout ls databases` on debug builds) |
+| Database (sessions, interventions) | `/data/data/com.assemblers.snapout/databases/snapout.db` (private; use the Insights tab, or `adb shell run-as com.assemblers.snapout ls databases` on debug builds) |
 | Settings | `/data/data/com.assemblers.snapout/shared_prefs/snapout.xml` (private) |
 
 Useful adb commands:
@@ -201,6 +202,8 @@ Useful adb commands:
 
 ## 11. Troubleshooting
 
+- **No nudge notification:** Home shows "Allow notifications" → tap it and allow. Also check the "Scroll nudges" channel is not silenced in the app's notification settings.
+
 | Problem | Fix |
 |---|---|
 | `adb: no devices/emulators found` | Unlock the phone and accept the USB debugging prompt; set USB mode to *File transfer*; try another cable/port; `.\adb kill-server` then `.\adb devices`; on Windows install your brand's USB driver (Samsung USB Driver, or Google USB Driver: <https://developer.android.com/studio/run/win-usb>). Or use Wireless debugging (§3). |
@@ -209,17 +212,19 @@ Useful adb commands:
 | Model "Failed" to load | Try a smaller model; close other apps; check `.\adb logcat -s SnapOutLlm`. |
 | Accessibility switch greyed out | Allow restricted settings (§6), or use the adb shortcut. |
 | Service turns itself off | Battery optimisation killed it. Settings → Apps → SnapOut → Battery → **Unrestricted**. |
-| Pop-up never appears by itself | Check that Protection is on and **Service running**. Then scroll in the app and watch **Raw events** on Home: if *feed apps* stays 0, that app isn't sending scroll events on your phone. Note the app and phone model and report it. Use **Trigger intervention now** for the demo meanwhile. |
+| Nudge never appears by itself | Check that Protection is on and **Service running**. Then scroll in the app and watch **Raw events** on Home: if *feed apps* stays 0, that app isn't sending scroll events on your phone. Note the app and phone model and report it. Use **Send test nudge now** for the demo meanwhile. |
 | YouTube score stays low | YouTube sends fewer scroll events than TikTok. Swipe Shorts every 2–3 s with Demo mode on. Check that the *feed apps* counter and the `item=` value in **last scroll** change as you swipe. |
-| Messages look the same | Check the label in the pop-up's AI panel. "Built-in message" means the model isn't loaded (step 2 of §7). |
+| Messages look the same | Check the notification subtext. "built-in message" means the model isn't loaded (step 2 of §7). |
 
 ## 12. Other ways to use the local model
+
+Already in the app: the model writes every nudge from the live numbers, and **Insights → Analyze my scrolling** analyses your week. Ideas below are not built yet.
 
 The same on-device model, with the same privacy guarantees, could also do the following. These are ideas, not implemented.
 
 | Idea | What the model does | Effort |
 |---|---|---|
-| **"What were you looking for?" reply** | Overlay offers quick answers (Bored / Can't sleep / Avoiding something / typed reason); the model replies to *that* reason with one tiny next step | Small: one more prompt + buttons |
+| **"What were you looking for?" reply** | The notification offers quick reply buttons (Bored / Can't sleep / Avoiding something / typed reason); the model replies to *that* reason with one tiny next step | Small: one more prompt + buttons |
 | **Morning recap card** | Summarises last night from the local DB: "You drifted ~10 min after opening TikTok in bed, 3 nights running" | Small: query DB → prompt |
 | **Weekly pattern insights** | Finds your riskiest time/app/context and suggests one rule ("no TikTok after 23:00?") | Medium |
 | **Goal coach at onboarding** | Turns a vague goal ("sleep better") into a concrete one ("phone down by 23:30") | Small |

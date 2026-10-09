@@ -15,6 +15,9 @@ data class SettingsState(
     val goal: String = "",
     val onboarded: Boolean = false,
     val modelFile: String = "",
+    val insights: String = "",
+    val insightsAt: Long = 0L,
+    val insightsBy: String = "",
 )
 
 class Settings(context: Context) {
@@ -31,6 +34,9 @@ class Settings(context: Context) {
         goal = prefs.getString("goal", "")!!,
         onboarded = prefs.getBoolean("onboarded", false),
         modelFile = prefs.getString("modelFile", "")!!,
+        insights = prefs.getString("insights", "")!!,
+        insightsAt = prefs.getLong("insightsAt", 0L),
+        insightsBy = prefs.getString("insightsBy", "")!!,
     )
 
     fun update(f: (SettingsState) -> SettingsState) {
@@ -44,6 +50,9 @@ class Settings(context: Context) {
             .putString("goal", s.goal)
             .putBoolean("onboarded", s.onboarded)
             .putString("modelFile", s.modelFile)
+            .putString("insights", s.insights)
+            .putLong("insightsAt", s.insightsAt)
+            .putString("insightsBy", s.insightsBy)
             .apply()
         _state.value = s
     }
