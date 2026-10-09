@@ -176,7 +176,9 @@ If none is selected, SnapOut uses the smallest model in the folder.
 | Qwen2.5 1.5B | [`Qwen2.5-1.5B-Instruct_multi-prefill-seq_q8_ekv4096.litertlm`](https://huggingface.co/litert-community/Qwen2.5-1.5B-Instruct) | 1.6 GB | No | Better writing, slower load |
 | Gemma 4 E2B | [`gemma-4-E2B-it.litertlm`](https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm) | 2.6 GB | No | Best quality; slow to load, flagship phones only |
 
-Use the generic file from each repo, not the ones named after a chip. Only Gemma 3 1B and Qwen3 0.6B have been exercised with SnapOut so far; the others use the same runtime (LiteRT-LM) but are untested.
+Use the generic file from each repo, not the ones named after a chip.
+
+**Tested so far:** Qwen3 0.6B generates on-topic messages in SnapOut (Android emulator, CPU: ~25 s to first word there, so a real phone will be much faster). Gemma 3 1B is the intended default but has not been run in SnapOut yet, because its download needs a Hugging Face login. The other models use the same runtime (LiteRT-LM) but are untested. If the GPU fails while generating (e.g. no OpenCL, which is common on emulators), SnapOut switches to CPU automatically.
 
 **To change the prompt or behaviour of the AI:** `app/src/main/java/com/assemblers/snapout/ai/PromptBuilder.kt` (system prompt, "angles" picked at random per message, output filter). The built-in messages used when no model is loaded are in `ai/FallbackTemplates.kt`.
 
