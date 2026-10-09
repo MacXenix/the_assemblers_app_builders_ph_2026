@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">SnapOut</string>
+    <string name="a11y_label">SnapOut scroll detection</string>
+    <string name="a11y_description">SnapOut notices the rhythm of your scrolling in feed apps (scroll timing, taps and which app is open) so it can interrupt doom-scrolling. It cannot read screen content. All processing, including the AI, happens on this phone and nothing is sent anywhere.</string>
+</resources>
