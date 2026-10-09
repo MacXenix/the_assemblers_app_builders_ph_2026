@@ -5,6 +5,7 @@ import com.assemblers.snapout.ai.LlmManager
 import com.assemblers.snapout.ai.ReframeContext
 import com.assemblers.snapout.core.FeedApps
 import com.assemblers.snapout.core.ScorerConfig
+import com.assemblers.snapout.core.ScrollSignal
 import com.assemblers.snapout.core.TranceScorer
 import com.assemblers.snapout.core.TranceSnapshot
 import com.assemblers.snapout.core.TranceState
@@ -15,8 +16,16 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.Calendar
+import kotlin.random.Random
 
-data class Diagnostics(val scrollEvents: Int = 0, val clickEvents: Int = 0, val windowEvents: Int = 0, val lastPackage: String? = null)
+data class Diagnostics(
+    val scrollEvents: Int = 0,
+    val feedScrollEvents: Int = 0,
+    val clickEvents: Int = 0,
+    val windowEvents: Int = 0,
+    val lastPackage: String? = null,
+    val lastScroll: String? = null,
+)
 
 /** Glue between accessibility events, the deterministic scorer, and the intervention trigger. */
 class TranceEngine(
@@ -72,11 +81,18 @@ class TranceEngine(
         }
     }
 
-    fun onScroll(pkg: String?, deltaY: Int, now: Long) {
-        _diag.value = _diag.value.copy(scrollEvents = _diag.value.scrollEvents + 1, lastPackage = pkg)
-        if (!FeedApps.isFeed(pkg)) return
+    fun onScroll(pkg: String?, sig: ScrollSignal, now: Long) {
+        val feed = FeedApps.isFeed(pkg)
+        val d = _diag.value
+        _diag.value = d.copy(
+            scrollEvents = d.scrollEvents + 1,
+            feedScrollEvents = d.feedScrollEvents + if (feed) 1 else 0,
+            lastPackage = pkg,
+            lastScroll = "dy=${sig.dy} dx=${sig.dx} item=${sig.fromIndex}..${sig.toIndex}/${sig.itemCount}",
+        )
+        if (!feed || sig.horizontalOnly) return
         if (feedPackage != pkg) onWindowChanged(pkg, now)
-        scorer.onScroll(now, deltaY)
+        scorer.onScroll(now, sig.dy, sig.fromIndex)
     }
 
     fun onClick(pkg: String?, now: Long) {
@@ -112,12 +128,14 @@ class TranceEngine(
         }
     }
 
-    /** Demo button: show the intervention immediately with whatever stats we have. */
+    /** Demo button: live stats if a feed session is running, otherwise a varied made-up session. */
     fun forceTrigger() {
         val snap = _snapshot.value.let {
-            if (it.feedPackage != null) it else it.copy(
-                feedPackage = "com.zhiliaoapp.musically", sessionMinutes = 42.0, sessionSwipes = 118,
-                isDark = true, isLate = true, score = 87, state = TranceState.ZOMBIE,
+            if (it.feedPackage != null && it.sessionSwipes > 0) it else it.copy(
+                feedPackage = DEMO_APPS.random(),
+                sessionMinutes = Random.nextInt(12, 75).toDouble(),
+                sessionSwipes = Random.nextInt(60, 260),
+                score = Random.nextInt(82, 97), state = TranceState.ZOMBIE,
             )
         }
         fire(snap)
@@ -173,5 +191,6 @@ class TranceEngine(
     companion object {
         const val OWN_PACKAGE = "com.assemblers.snapout"
         private const val LEAVE_GRACE_MS = 5_000L
+        private val DEMO_APPS = listOf("com.zhiliaoapp.musically", "com.google.android.youtube", "com.instagram.android")
     }
 }

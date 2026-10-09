@@ -51,6 +51,23 @@ class TranceScorerTest {
         assertTrue(compute(s, t).score >= 80)
     }
 
+    @Test fun continuousScrollCountsNewItemsAsSwipes() {
+        val s = TranceScorer()
+        s.startSession(0)
+        var t = 0L
+        var item = 0
+        while (t < 10_000L) { t += 100; if (t % 1_000 == 0L) item++; s.onScroll(t, 0, item) }
+        assertEquals(10, s.sessionSwipes)
+    }
+
+    @Test fun pagerSwipeIsNotDoubleCounted() {
+        val s = TranceScorer()
+        s.startSession(0)
+        s.onScroll(1000, 0, 4)
+        s.onScroll(1300, 0, 5)
+        assertEquals(1, s.sessionSwipes)
+    }
+
     @Test fun medianGap() {
         assertEquals(2000, TranceScorer.medianGap(listOf(0, 1000, 3000, 6000)))
     }

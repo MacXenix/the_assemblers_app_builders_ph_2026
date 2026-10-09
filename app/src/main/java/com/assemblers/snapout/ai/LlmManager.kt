@@ -4,7 +4,6 @@ import android.content.Context
 import android.util.Log
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
-import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
@@ -23,6 +22,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
+import kotlin.random.Random
 
 enum class EngineStatus { NO_MODEL, IDLE, LOADING, READY, ERROR }
 
@@ -46,7 +46,7 @@ data class Reframe(
     enum class Source { PENDING, GEMMA, FALLBACK }
 }
 
-class LlmManager(private val context: Context) {
+class LlmManager(private val context: Context, private val preferredModel: () -> String) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val lock = Mutex()
     private var engine: Engine? = null
@@ -59,13 +59,27 @@ class LlmManager(private val context: Context) {
     val current: StateFlow<Reframe> = _current.asStateFlow()
 
     private var pregenerated: Reframe? = null
+    /** Set when GPU loaded but failed at generation time (e.g. no OpenCL); later loads go straight to CPU. */
+    private var cpuOnly = false
+    private val currentModelName get() = _status.value.modelName
 
     fun modelCandidates(): List<File> = listOfNotNull(
         context.getExternalFilesDir(null),
         File("/data/local/tmp/llm"),
     ).flatMap { dir -> dir.listFiles { f -> f.name.endsWith(".litertlm") }?.toList().orEmpty() }
 
-    fun findModel(): File? = modelCandidates().minByOrNull { it.length() }
+    val modelDir: String get() = context.getExternalFilesDir(null)?.absolutePath ?: "?"
+
+    /** The model picked on Home, else the smallest one found. */
+    fun findModel(): File? = modelCandidates().let { all ->
+        all.firstOrNull { it.name == preferredModel() } ?: all.minByOrNull { it.length() }
+    }
+
+    /** Unload the current model so the next generation loads the newly selected one. */
+    fun switchModel() {
+        pregenerated = null
+        release()
+    }
 
     fun refreshModelPresence() {
         if (engine == null && _status.value.status != EngineStatus.LOADING) {
@@ -87,7 +101,7 @@ class LlmManager(private val context: Context) {
         }
         _status.value = AiStatus(EngineStatus.LOADING, model.name)
         val started = System.currentTimeMillis()
-        for (backend in listOf<Backend>(Backend.GPU(), Backend.CPU())) {
+        for (backend in if (cpuOnly) listOf<Backend>(Backend.CPU()) else listOf(Backend.GPU(), Backend.CPU())) {
             try {
                 val e = Engine(EngineConfig(modelPath = model.absolutePath, backend = backend, cacheDir = context.cacheDir.path))
                 e.initialize()
@@ -144,28 +158,35 @@ class LlmManager(private val context: Context) {
         scope.launch { generateBlocking(ctx, publish = true) }
     }
 
-    private suspend fun generateBlocking(ctx: ReframeContext, publish: Boolean): Reframe {
+    private suspend fun generateBlocking(ctx: ReframeContext, publish: Boolean): Reframe =
+        withTimeoutOrNull(GENERATION_TIMEOUT_MS) { generate(ctx, publish) }
+            ?: fallback(ctx, ctx.toJson(), publish).also { Log.w(TAG, "Generation timed out") }
+
+    private suspend fun generate(ctx: ReframeContext, publish: Boolean): Reframe {
         val json = ctx.toJson()
         val e = withTimeoutOrNull(LOAD_TIMEOUT_MS) { ensureEngine() }
         if (e == null) return fallback(ctx, json, publish)
         return try {
             lock.withLock {
+                // System text goes in the user turn: some model templates (e.g. Qwen3) reject a structured system message.
+                val qwen = currentModelName?.contains("qwen", true) == true
                 val config = ConversationConfig(
-                    systemInstruction = Contents.of(PromptBuilder.SYSTEM),
-                    samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 0.9),
+                    samplerConfig = SamplerConfig(topK = 40, topP = 0.95, temperature = 1.0, seed = Random.nextInt(1, Int.MAX_VALUE)),
+                    maxOutputToken = MAX_OUTPUT_TOKENS,
+                    chatTemplate = if (qwen) PromptBuilder.QWEN_TEMPLATE else null,
                 )
                 e.createConversation(config).use { conv ->
                     val start = System.currentTimeMillis()
                     var first: Long? = null
                     var chunks = 0
                     val sb = StringBuilder()
-                    conv.sendMessageAsync(PromptBuilder.userPrompt(ctx)).collect { msg ->
+                    conv.sendMessageAsync(PromptBuilder.fullPrompt(ctx)).collect { msg ->
                         val piece = msg.contents.contents.filterIsInstance<Content.Text>().joinToString("") { it.text }
                         if (piece.isEmpty()) return@collect
                         if (first == null) first = System.currentTimeMillis() - start
                         chunks++
                         sb.append(piece)
-                        if (publish) _current.value = Reframe(sb.toString(), false, Reframe.Source.GEMMA, first, null, json)
+                        if (publish) _current.value = Reframe(PromptBuilder.streamView(sb.toString()), false, Reframe.Source.GEMMA, first, null, json)
                     }
                     val total = (System.currentTimeMillis() - start - (first ?: 0)).coerceAtLeast(1)
                     val cleaned = PromptBuilder.postFilter(sb.toString())
@@ -179,6 +200,15 @@ class LlmManager(private val context: Context) {
             }
         } catch (t: Throwable) {
             Log.w(TAG, "Generation failed", t)
+            if (!cpuOnly && _status.value.backend == "GPU") {
+                cpuOnly = true
+                lock.withLock {
+                    val old = engine
+                    engine = null
+                    scope.launch { runCatching { old?.close() } }
+                }
+                return generate(ctx, publish)
+            }
             fallback(ctx, json, publish)
         }
     }
@@ -194,5 +224,7 @@ class LlmManager(private val context: Context) {
         private const val IDLE_RELEASE_MS = 5 * 60_000L
         private const val LOAD_TIMEOUT_MS = 20_000L
         private const val CHARS_PER_TOKEN = 4.0
+        private const val MAX_OUTPUT_TOKENS = 160
+        private const val GENERATION_TIMEOUT_MS = 45_000L
     }
 }

@@ -12,6 +12,10 @@ object FallbackTemplates {
         "Quick check-in: are you enjoying this, or just continuing it?",
         "You set a goal: \"{goal}\". Is now a good moment to honor it?",
         "{swipes} videos in {min} minutes. Which one do you remember?",
+        "Your eyes have been on {app} for {min} minutes. How do they feel right now?",
+        "What is one thing you could do in the next five minutes that you'd actually enjoy?",
+        "Tomorrow-you wakes up in a few hours. What would they want you to do now?",
+        "Is {app} giving you what you came for, or just more of the same?",
     )
 
     fun pick(ctx: ReframeContext): String {

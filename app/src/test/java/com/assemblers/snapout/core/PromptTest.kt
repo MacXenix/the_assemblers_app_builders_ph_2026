@@ -25,6 +25,27 @@ class PromptTest {
         assertEquals("Hello there?", PromptBuilder.postFilter("  \"Hello   there?\" "))
     }
 
+    @Test fun postFilterStripsThinking() {
+        assertEquals("Still there?", PromptBuilder.postFilter("<think>plan</think>\nStill there?"))
+        assertNull(PromptBuilder.postFilter("<think>never closed"))
+    }
+
+    @Test fun fullPromptCarriesSystemAndContext() {
+        val p = PromptBuilder.fullPrompt(ctx)
+        assertTrue(p.startsWith(PromptBuilder.SYSTEM))
+        assertTrue(p.contains(ctx.toJson()))
+    }
+
+    @Test fun streamViewHidesReasoning() {
+        assertEquals("", PromptBuilder.streamView("<think>still planning"))
+        assertEquals("Hi there", PromptBuilder.streamView("<think>x</think>\nHi there"))
+        assertEquals("Hi", PromptBuilder.streamView("Hi"))
+    }
+
+    @Test fun promptIncludesAngle() {
+        assertTrue(PromptBuilder.userPrompt(ctx.copy(angle = "ask about breathing")).contains("ask about breathing"))
+    }
+
     @Test fun toneEscalates() {
         assertEquals("gentle and curious", ctx.tone())
         assertTrue(ctx.copy(interventionsTonight = 3).tone().startsWith("direct"))

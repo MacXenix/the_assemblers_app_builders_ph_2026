@@ -3,6 +3,7 @@ package com.assemblers.snapout.service
 import android.accessibilityservice.AccessibilityService
 import android.view.accessibility.AccessibilityEvent
 import com.assemblers.snapout.app
+import com.assemblers.snapout.core.ScrollSignal
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -12,7 +13,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * Reads only event type, package name, timestamps and scroll deltas.
+ * Reads only event type, package name, timestamps, scroll deltas and list positions.
  * canRetrieveWindowContent=false, so screen text/content is never accessible.
  */
 class SnapOutAccessibilityService : AccessibilityService() {
@@ -40,7 +41,11 @@ class SnapOutAccessibilityService : AccessibilityService() {
         val now = System.currentTimeMillis()
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> engine.onWindowChanged(pkg, now)
-            AccessibilityEvent.TYPE_VIEW_SCROLLED -> engine.onScroll(pkg, event.scrollDeltaY, now)
+            AccessibilityEvent.TYPE_VIEW_SCROLLED -> engine.onScroll(
+                pkg,
+                ScrollSignal(event.scrollDeltaX, event.scrollDeltaY, event.fromIndex, event.toIndex, event.itemCount),
+                now,
+            )
             AccessibilityEvent.TYPE_VIEW_CLICKED -> engine.onClick(pkg, now)
         }
     }
