@@ -1,49 +1,61 @@
 package com.assemblers.snapout.ui
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.assemblers.snapout.SnapOutApp
+import com.assemblers.snapout.ai.EngineStatus
 import com.assemblers.snapout.ai.PromptBuilder
 import com.assemblers.snapout.core.RuleInsights
 import com.assemblers.snapout.core.SampleData
@@ -52,17 +64,9 @@ import com.assemblers.snapout.core.render
 import com.assemblers.snapout.ui.theme.Amber
 import com.assemblers.snapout.ui.theme.Coral
 import com.assemblers.snapout.ui.theme.Mint
-import androidx.compose.foundation.Canvas
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-
-import androidx.compose.material3.FilterChip
-import com.assemblers.snapout.ai.EngineStatus
 
 private val fmt = SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
 
@@ -76,13 +80,9 @@ fun InsightsScreen(app: SnapOutApp, modifier: Modifier = Modifier) {
     val sessions = remember(version) { app.db.sessions(500) }
     val summary = remember(version) { UsageSummary.from(sessions, interventions, System.currentTimeMillis()) }
 
-    var showAllNudges by remember { mutableStateOf(false) }
-    var showAllSessions by remember { mutableStateOf(false) }
+    var showAnalysisModal by remember { mutableStateOf(false) }
 
-    val displayedNudges = if (showAllNudges) interventions else interventions.take(5)
-    val displayedSessions = if (showAllSessions) sessions else sessions.take(5)
-
-    LazyColumn(modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    LazyColumn(modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         item {
             Column(Modifier.padding(top = 20.dp)) {
                 Text("Insights & On-Device AI", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
@@ -113,7 +113,6 @@ fun InsightsScreen(app: SnapOutApp, modifier: Modifier = Modifier) {
                         Modifier.horizontalScroll(rememberScrollState()),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        // Option to disable AI model and use rules only
                         FilterChip(
                             selected = settings.modelFile == "none",
                             onClick = {
@@ -160,9 +159,63 @@ fun InsightsScreen(app: SnapOutApp, modifier: Modifier = Modifier) {
                 }
             }
         } else {
+            // Dashboard with interactive Stacked Graph & Highlighting
             item { StatsCard(summary, sessions, interventions) }
+
+            // Action Card to Open AI Analysis Modal (eliminating heavy vertical scroll)
             item {
-                AnalysisCard(
+                Card(
+                    modifier = Modifier.fillMaxWidth().border(1.dp, Amber.copy(alpha = 0.5f), RoundedCornerShape(12.dp)),
+                    colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.35f)),
+                ) {
+                    Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text("AI Telemetry Analysis", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Amber)
+                                Text("Deep synthesis of habits, speed, and advice", fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
+                            }
+                            Button(onClick = { showAnalysisModal = true }) {
+                                Text("View Analysis ↗")
+                            }
+                        }
+                        val items = remember(settings.insights) { PromptBuilder.parseInsights(settings.insights) }
+                        if (items.isNotEmpty()) {
+                            Text(
+                                "Latest: \"${items.firstOrNull()?.text ?: ""}\"",
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                color = Mint,
+                                fontFamily = FontFamily.Monospace,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Focused Chat Card
+        item { ChatCard(app, summary, settings.goal) }
+        item { Spacer(Modifier.height(16.dp)) }
+    }
+
+    // Modal Sheet for AI Analysis
+    if (showAnalysisModal) {
+        AlertDialog(
+            onDismissRequest = { showAnalysisModal = false },
+            confirmButton = {
+                TextButton(onClick = { showAnalysisModal = false }) { Text("Close", color = Amber) }
+            },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("AI Telemetry Analysis", fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                AnalysisContent(
                     stored = settings.insights,
                     by = settings.insightsBy,
                     at = settings.insightsAt,
@@ -176,92 +229,9 @@ fun InsightsScreen(app: SnapOutApp, modifier: Modifier = Modifier) {
                         app.settings.update { it.copy(insights = text, insightsAt = System.currentTimeMillis(), insightsBy = by) }
                     }
                 }
-            }
-        }
-
-        item { ChatCard(app, summary, settings.goal) }
-
-        // Nudges Section with View All toggle
-        item {
-            Row(
-                Modifier.fillMaxWidth().padding(top = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Recent Nudges (${interventions.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                if (interventions.size > 5) {
-                    Text(
-                        if (showAllNudges) "Show less" else "See all (${interventions.size})",
-                        fontSize = 12.sp,
-                        color = Amber,
-                        modifier = Modifier.clickable { showAllNudges = !showAllNudges },
-                    )
-                }
-            }
-        }
-
-        if (interventions.isEmpty()) item { Text("No nudges triggered yet.", fontSize = 13.sp, color = Color.Gray) }
-        items(displayedNudges, key = { "i${it.id}" }) { i ->
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp)) {
-                    Text("${fmt.format(Date(i.at))} · ${i.app} · score ${i.score}", fontSize = 12.sp, color = Color.Gray)
-                    Spacer(Modifier.height(2.dp))
-                    Text(i.text.ifBlank { "—" }, fontSize = 14.sp)
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "${if (i.source == "GEMMA") "On-device AI" else "Built-in"}${i.ttftMs?.let { " · $it ms" } ?: ""} · ${outcomeLabel(i.outcome)}",
-                        fontSize = 11.sp, color = Color.Gray,
-                    )
-                }
-            }
-        }
-
-        // Feed Sessions Section with View All toggle
-        item {
-            Row(
-                Modifier.fillMaxWidth().padding(top = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("Feed Sessions (${sessions.size})", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                if (sessions.size > 5) {
-                    Text(
-                        if (showAllSessions) "Show less" else "See all (${sessions.size})",
-                        fontSize = 12.sp,
-                        color = Amber,
-                        modifier = Modifier.clickable { showAllSessions = !showAllSessions },
-                    )
-                }
-            }
-        }
-
-        if (sessions.isEmpty()) item { Text("No feed sessions recorded yet.", fontSize = 13.sp, color = Color.Gray) }
-        items(displayedSessions, key = { "s${it.id}" }) { s ->
-            Card(Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(12.dp)) {
-                    Text("${fmt.format(Date(s.startedAt))} · ${s.app}", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        "%d min · %d swipes · %d taps · %.1f s/video · peak %d%s%s".format(
-                            ((s.endedAt - s.startedAt) / 60_000).toInt(), s.swipes, s.taps, s.avgDwellMs / 1000.0, s.peakScore,
-                            if (s.late) " · late" else "", if (s.intervened) " · nudged" else "",
-                        ),
-                        fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f),
-                    )
-                }
-            }
-        }
-
-        item { Spacer(Modifier.height(16.dp)) }
+            },
+        )
     }
-}
-
-private fun outcomeLabel(o: String?) = when (o) {
-    "went_home" -> "left the feed"
-    "snoozed" -> "snoozed"
-    "dismissed" -> "swiped away"
-    "continued" -> "kept scrolling"
-    else -> "no action"
 }
 
 @Composable
@@ -271,6 +241,7 @@ private fun StatsCard(
     allNudges: List<com.assemblers.snapout.data.Intervention>,
 ) {
     var selectedApp by remember { mutableStateOf<String?>(null) } // null = All Apps Average
+    var selectedHour by remember { mutableStateOf<Int?>(null) } // clicked hour on timeline
 
     // Compute stats for selected app or overall
     val targetSessions = remember(selectedApp, allSessions) {
@@ -285,8 +256,10 @@ private fun StatsCard(
 
     val chartColors = listOf(Mint, Amber, Coral, Color(0xFF60A5FA), Color(0xFFA78BFA), Color(0xFFF472B6))
 
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Card(
+        Modifier.fillMaxWidth().border(1.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(12.dp)),
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -296,10 +269,11 @@ private fun StatsCard(
                     if (selectedApp == null) "Dashboard: All Apps Average" else "Dashboard: $selectedApp",
                     fontWeight = FontWeight.Bold,
                     fontSize = 16.sp,
+                    color = if (selectedApp != null) Amber else Color.White,
                 )
                 if (selectedApp != null) {
                     Text(
-                        "Show All Apps",
+                        "Reset to All",
                         fontSize = 12.sp,
                         color = Amber,
                         fontWeight = FontWeight.SemiBold,
@@ -327,22 +301,21 @@ private fun StatsCard(
                 }
             }
 
-            // Visual Chart: Circular Distribution (Donut Chart) + Bar Comparison
+            // Time Distribution (Donut Chart)
             if (overall.apps.isNotEmpty()) {
                 Card(
-                    colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.25f)),
-                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.25f)),
+                    modifier = Modifier.fillMaxWidth().border(1.dp, Mint.copy(alpha = 0.3f), RoundedCornerShape(8.dp)),
                 ) {
                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("Time Distribution Chart", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.8f))
+                        Text("Time Distribution Chart", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Mint)
                         Row(
                             Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceEvenly,
                         ) {
-                            // Donut Chart
-                            Box(Modifier.size(100.dp), contentAlignment = Alignment.Center) {
-                                Canvas(Modifier.size(90.dp)) {
+                            Box(Modifier.size(95.dp), contentAlignment = Alignment.Center) {
+                                Canvas(Modifier.size(85.dp)) {
                                     val strokeWidth = 14.dp.toPx()
                                     val arcSize = Size(size.width - strokeWidth, size.height - strokeWidth)
                                     val topLeft = Offset(strokeWidth / 2, strokeWidth / 2)
@@ -352,14 +325,15 @@ private fun StatsCard(
                                     overall.apps.forEachIndexed { idx, app ->
                                         val sweep = (app.minutes.toFloat() / totalMin) * 360f
                                         val color = chartColors[idx % chartColors.size]
+                                        val isAppCur = selectedApp == app.app
                                         drawArc(
-                                            color = color,
+                                            color = if (selectedApp != null && !isAppCur) color.copy(alpha = 0.25f) else color,
                                             startAngle = startAngle,
                                             sweepAngle = sweep,
                                             useCenter = false,
                                             topLeft = topLeft,
                                             size = arcSize,
-                                            style = Stroke(width = strokeWidth, cap = StrokeCap.Butt),
+                                            style = Stroke(width = if (isAppCur) strokeWidth * 1.3f else strokeWidth, cap = StrokeCap.Butt),
                                         )
                                         startAngle += sweep
                                     }
@@ -372,20 +346,21 @@ private fun StatsCard(
                                 )
                             }
 
-                            // Legend & Quick Bars
+                            // Legend & Quick Selectors
                             Column(Modifier.weight(1f).padding(start = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 overall.apps.take(4).forEachIndexed { idx, app ->
                                     val color = chartColors[idx % chartColors.size]
                                     val pct = if (overall.totalMinutes == 0) 0 else (100 * app.minutes / overall.totalMinutes)
+                                    val isCur = selectedApp == app.app
                                     Row(
-                                        Modifier.fillMaxWidth().clickable { selectedApp = app.app },
+                                        Modifier.fillMaxWidth().clickable { selectedApp = if (isCur) null else app.app },
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Box(Modifier.size(8.dp, 8.dp).padding(end = 4.dp), contentAlignment = Alignment.Center) {
-                                            Canvas(Modifier.fillMaxSize()) { drawCircle(color) }
+                                            Canvas(Modifier.fillMaxSize()) { drawCircle(if (selectedApp != null && !isCur) color.copy(alpha = 0.3f) else color) }
                                         }
                                         Spacer(Modifier.width(6.dp))
-                                        Text(app.app, Modifier.weight(1f), fontSize = 11.sp, color = if (selectedApp == app.app) Amber else Color.White)
+                                        Text(app.app, Modifier.weight(1f), fontSize = 11.sp, color = if (isCur) Amber else Color.White, fontWeight = if (isCur) FontWeight.Bold else FontWeight.Normal)
                                         Text("$pct%", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = color)
                                     }
                                 }
@@ -395,7 +370,7 @@ private fun StatsCard(
                 }
             }
 
-            // Key Telemetry Metrics Grid for Selected App or All
+            // Key Telemetry Metrics Grid
             Row {
                 Stat("${targetSummary.totalMeters} m", "feed mileage", Modifier.weight(1f))
                 Stat("${targetSummary.sessions}", "sessions", Modifier.weight(1f))
@@ -412,74 +387,176 @@ private fun StatsCard(
                 Stat(targetSummary.peakHour?.let { "%02d:00".format(it) } ?: "—", "peak hour", Modifier.weight(1f))
             }
 
-            // 24-Hour Activity Distribution Chart
-            Text("24-Hour Activity Timeline", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            val hourly = targetSummary.hourlyMinutes
-            val maxHourMin = remember(hourly) { (hourly.values.maxOrNull() ?: 1).coerceAtLeast(1) }
-            Column(
-                Modifier.fillMaxWidth()
-                    .background(Color.Black.copy(alpha = 0.25f), RoundedCornerShape(8.dp))
-                    .padding(10.dp),
+            // Highlighted Component: 24-Hour Activity Timeline Stacked Bar Graph
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.35f)),
+                modifier = Modifier.fillMaxWidth().border(1.dp, Color(0xFF60A5FA).copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
             ) {
-                Row(
-                    Modifier.fillMaxWidth().height(65.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.Bottom,
-                ) {
-                    (0..23).forEach { h ->
-                        val m = hourly[h] ?: 0
-                        val barFraction = (m.toFloat() / maxHourMin).coerceIn(0.06f, 1f)
-                        val barColor = when (h) {
-                            in 0..4, in 22..23 -> Coral  // Late night
-                            in 5..11 -> Mint             // Morning
-                            in 12..16 -> Color(0xFF60A5FA)// Afternoon
-                            else -> Amber                // Evening
-                        }
-                        val isPeak = h == targetSummary.peakHour && m > 0
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.weight(1f).padding(horizontal = 1.dp),
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height((50 * barFraction).dp)
-                                    .background(if (isPeak) Amber else barColor.copy(alpha = if (m > 0) 0.9f else 0.15f), RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp)),
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("24-Hour Activity Timeline", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color(0xFF60A5FA))
+                        if (selectedHour != null) {
+                            Text(
+                                "Hour %02d:00 (%d min)".format(selectedHour, targetSummary.hourlyMinutes[selectedHour] ?: 0),
+                                fontSize = 11.sp,
+                                color = Amber,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
                             )
+                        } else {
+                            Text("Tap bar to inspect", fontSize = 10.sp, color = Color.Gray)
                         }
                     }
-                }
-                Spacer(Modifier.height(4.dp))
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("00:00", fontSize = 10.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
-                    Text("06:00", fontSize = 10.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
-                    Text("12:00", fontSize = 10.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
-                    Text("18:00", fontSize = 10.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
-                    Text("23:00", fontSize = 10.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
+
+                    // Compute per-app minutes for each hour so each bar can be stacked by app
+                    val hourlyByApp = remember(targetSessions) {
+                        val cal = java.util.Calendar.getInstance()
+                        val map = mutableMapOf<Int, MutableMap<String, Double>>()
+                        targetSessions.forEach { s ->
+                            cal.timeInMillis = s.startedAt
+                            val h = cal.get(java.util.Calendar.HOUR_OF_DAY)
+                            val m = (s.endedAt - s.startedAt) / 60_000.0
+                            val appMap = map.getOrPut(h) { mutableMapOf() }
+                            appMap[s.app] = (appMap[s.app] ?: 0.0) + m
+                        }
+                        map
+                    }
+
+                    val hourlyTotals = remember(hourlyByApp) {
+                        (0..23).associateWith { h -> hourlyByApp[h]?.values?.sum() ?: 0.0 }
+                    }
+                    val maxHourTotal = remember(hourlyTotals) {
+                        (hourlyTotals.values.maxOrNull() ?: 1.0).coerceAtLeast(1.0)
+                    }
+
+                    Row(
+                        Modifier.fillMaxWidth().height(75.dp).padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.Bottom,
+                    ) {
+                        (0..23).forEach { h ->
+                            val appMap = hourlyByApp[h].orEmpty()
+                            val totalHourMin = hourlyTotals[h] ?: 0.0
+                            val barHeightFraction = (totalHourMin / maxHourTotal).toFloat().coerceIn(if (totalHourMin > 0) 0.12f else 0.05f, 1f)
+                            val isSelected = selectedHour == h
+                            val isPeak = h == targetSummary.peakHour && totalHourMin > 0
+
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Bottom,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(70.dp)
+                                    .clickable { selectedHour = if (selectedHour == h) null else h }
+                                    .padding(horizontal = 1.dp),
+                            ) {
+                                // Stacked bar container for this hour
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height((58 * barHeightFraction).dp)
+                                        .border(
+                                            width = if (isSelected) 1.5.dp else if (isPeak) 1.dp else 0.dp,
+                                            color = if (isSelected) Color.White else if (isPeak) Amber else Color.Transparent,
+                                            shape = RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp),
+                                        )
+                                        .background(
+                                            if (totalHourMin <= 0) Color.White.copy(alpha = 0.08f) else Color.Transparent,
+                                            RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp),
+                                        ),
+                                    verticalArrangement = Arrangement.Bottom,
+                                ) {
+                                    if (appMap.isEmpty()) {
+                                        Box(Modifier.fillMaxSize())
+                                    } else {
+                                        // Stacked segments colored by app
+                                        val totalAppMinInHour = appMap.values.sum().coerceAtLeast(0.001)
+                                        appMap.entries.forEach { (appName, appMin) ->
+                                            val appIdx = overall.apps.indexOfFirst { it.app.equals(appName, ignoreCase = true) }
+                                            val segColor = if (appIdx >= 0) chartColors[appIdx % chartColors.size] else Mint
+                                            val segFraction = (appMin / totalAppMinInHour).toFloat().coerceAtLeast(0.05f)
+                                            val isAppMatched = selectedApp == null || selectedApp.equals(appName, ignoreCase = true)
+                                            val isHourMatched = selectedHour == null || isSelected
+
+                                            val alpha = if (isAppMatched && isHourMatched) 0.95f else 0.22f
+
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .weight(segFraction)
+                                                    .background(segColor.copy(alpha = alpha)),
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(2.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("00:00", fontSize = 10.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
+                        Text("06:00", fontSize = 10.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
+                        Text("12:00", fontSize = 10.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
+                        Text("18:00", fontSize = 10.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
+                        Text("23:00", fontSize = 10.sp, color = Color.Gray, fontFamily = FontFamily.Monospace)
+                    }
                 }
             }
 
-            // Bar Breakdown per App
-            Text("Feed Time Breakdown", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
-            overall.apps.forEachIndexed { idx, a ->
-                val isCur = selectedApp == a.app
-                Column(
-                    Modifier.fillMaxWidth().clickable { selectedApp = if (isCur) null else a.app }.padding(vertical = 2.dp),
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            a.app + if (isCur) " (selected)" else "",
-                            Modifier.weight(0.9f),
-                            fontSize = 13.sp,
-                            color = if (isCur) Amber else Color.White,
-                            fontWeight = if (isCur) FontWeight.Bold else FontWeight.Normal,
-                        )
-                        LinearProgressIndicator(
-                            progress = { if (overall.totalMinutes == 0) 0f else a.minutes.toFloat() / overall.totalMinutes },
-                            modifier = Modifier.weight(1.4f).height(7.dp),
-                            color = chartColors[idx % chartColors.size],
-                        )
-                        Text("  ${a.minutes} min", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+            // Highlighted Component: Feed Time Breakdown (Stacked Bars)
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.35f)),
+                modifier = Modifier.fillMaxWidth().border(1.dp, Coral.copy(alpha = 0.35f), RoundedCornerShape(10.dp)),
+            ) {
+                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Feed Time Breakdown", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Coral)
+
+                    // Stacked Composite Progress Bar
+                    if (overall.totalMinutes > 0) {
+                        Row(
+                            Modifier.fillMaxWidth().height(10.dp).background(Color.DarkGray, RoundedCornerShape(5.dp)),
+                        ) {
+                            overall.apps.forEachIndexed { idx, a ->
+                                val weight = (a.minutes.toFloat() / overall.totalMinutes).coerceAtLeast(0.01f)
+                                val isCur = selectedApp == a.app
+                                Box(
+                                    Modifier
+                                        .weight(weight)
+                                        .height(10.dp)
+                                        .background(
+                                            if (selectedApp != null && !isCur) chartColors[idx % chartColors.size].copy(alpha = 0.3f)
+                                            else chartColors[idx % chartColors.size],
+                                        )
+                                        .clickable { selectedApp = if (isCur) null else a.app },
+                                )
+                            }
+                        }
+                    }
+
+                    overall.apps.forEachIndexed { idx, a ->
+                        val isCur = selectedApp == a.app
+                        Column(
+                            Modifier
+                                .fillMaxWidth()
+                                .clickable { selectedApp = if (isCur) null else a.app }
+                                .padding(vertical = 3.dp),
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    a.app + if (isCur) " (highlighted)" else "",
+                                    Modifier.weight(0.9f),
+                                    fontSize = 13.sp,
+                                    color = if (isCur) Amber else Color.White,
+                                    fontWeight = if (isCur) FontWeight.Bold else FontWeight.Normal,
+                                )
+                                LinearProgressIndicator(
+                                    progress = { if (overall.totalMinutes == 0) 0f else a.minutes.toFloat() / overall.totalMinutes },
+                                    modifier = Modifier.weight(1.4f).height(7.dp),
+                                    color = if (selectedApp != null && !isCur) chartColors[idx % chartColors.size].copy(alpha = 0.3f) else chartColors[idx % chartColors.size],
+                                )
+                                Text("  ${a.minutes} min", fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+                            }
+                        }
                     }
                 }
             }
@@ -503,7 +580,7 @@ private fun Stat(value: String, label: String, modifier: Modifier) {
 }
 
 @Composable
-private fun AnalysisCard(
+private fun AnalysisContent(
     stored: String,
     by: String,
     at: Long,
@@ -513,55 +590,61 @@ private fun AnalysisCard(
     onAnalyze: () -> Unit,
 ) {
     var showInput by remember { mutableStateOf(false) }
-    Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("AI Dashboard Analysis", fontWeight = FontWeight.SemiBold)
-            Text("The local on-device model reads your dashboard telemetry and suggests concrete behavioral improvements.", fontSize = 12.sp)
-            Button(onClick = onAnalyze, enabled = !running) { Text(if (running) "Analyzing telemetry…" else "Analyze dashboard data") }
-            if (running) {
-                LinearProgressIndicator(Modifier.fillMaxWidth(), color = Amber)
-                if (partial.isNotBlank()) Text(partial, fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = Color.White.copy(alpha = 0.7f))
+    Column(
+        Modifier.fillMaxWidth().verticalScroll(rememberScrollState()),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Text(
+            "The on-device model inspects your sensor physics, app speeds, and bedtime habits to generate 3 observations and 3 micro-action tips.",
+            fontSize = 12.sp,
+            color = Color.White.copy(alpha = 0.8f),
+        )
+        Button(onClick = onAnalyze, enabled = !running, modifier = Modifier.fillMaxWidth()) {
+            Text(if (running) "Analyzing telemetry…" else "Run On-Device Analysis Now")
+        }
+        if (running) {
+            LinearProgressIndicator(Modifier.fillMaxWidth(), color = Amber)
+            if (partial.isNotBlank()) Text(partial, fontSize = 12.sp, fontFamily = FontFamily.Monospace, color = Color.White.copy(alpha = 0.7f))
+        }
+        val items = remember(stored) { PromptBuilder.parseInsights(stored) }
+        items.forEach { item ->
+            Row(Modifier.padding(vertical = 2.dp)) {
+                Text(
+                    if (item.tip) "Tip  " else "Seen ",
+                    fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (item.tip) Mint else Coral,
+                    fontFamily = FontFamily.Monospace,
+                )
+                Text(item.text, fontSize = 13.sp)
             }
-            val items = remember(stored) { PromptBuilder.parseInsights(stored) }
-            items.forEach { item ->
-                Row {
-                    Text(
-                        if (item.tip) "Tip  " else "Seen ",
-                        fontSize = 12.sp, fontWeight = FontWeight.Bold, color = if (item.tip) Mint else Coral,
-                        fontFamily = FontFamily.Monospace,
-                    )
-                    Text(item.text, fontSize = 14.sp)
-                }
-            }
-            if (items.isNotEmpty()) Text(
-                (if (by == "rules" || by == "none") "Deterministic Heuristics (Rule-based engine)" else "Analyzed by $by · on-device") + " · ${fmt.format(Date(at))}",
-                fontSize = 11.sp, color = if (by == "rules" || by == "none") Amber else Color.Gray,
-            )
-            Text(
-                if (showInput) "Hide formatted model input ▲" else "Inspect formatted input seen by AI ▼",
-                fontSize = 12.sp, color = Amber, modifier = Modifier.clickable { showInput = !showInput },
-            )
-            if (showInput) {
-                Card(
-                    colors = androidx.compose.material3.CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.3f)),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("• Time window: ${summary.days} days (${summary.sessions} sessions, ${summary.totalMinutes} total mins)", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                        Text("• Swiping rate: ${summary.totalSwipes} swipes, avg %.1fs/video".format(summary.avgSecondsPerVideo), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                        Text("• Engagement: ${summary.tapsPer100Swipes} taps/100 swipes", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                        Text("• Bedtime habits: ${summary.lateNightPct}% late-night, ${summary.lyingPct}% lying down", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                        Text("• Nudge response: ${summary.wentHome}/${summary.nudges} left feed", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                        if (summary.apps.isNotEmpty()) {
-                            Text("• App Telemetry Breakdown:", fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = Mint)
-                            summary.apps.forEach { app ->
-                                Text(
-                                    "  - ${app.app}: ${app.minutes}m, ${app.meters}m, ${app.sessions} ses, %.1fs/vid, %d%% late".format(app.avgSecondsPerVideo, app.lateNightPct),
-                                    fontSize = 10.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = Color.White.copy(alpha = 0.85f),
-                                )
-                            }
+        }
+        if (items.isNotEmpty()) Text(
+            (if (by == "rules" || by == "none") "Deterministic Heuristics (Rule-based engine)" else "Analyzed by $by · on-device") + " · ${fmt.format(Date(at))}",
+            fontSize = 11.sp, color = if (by == "rules" || by == "none") Amber else Color.Gray,
+        )
+        Text(
+            if (showInput) "Hide formatted model input ▲" else "Inspect formatted input seen by AI ▼",
+            fontSize = 12.sp, color = Amber, modifier = Modifier.clickable { showInput = !showInput },
+        )
+        if (showInput) {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color.Black.copy(alpha = 0.3f)),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("• Time window: ${summary.days} days (${summary.sessions} sessions, ${summary.totalMinutes} total mins)", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    Text("• Swiping rate: ${summary.totalSwipes} swipes, avg %.1fs/video".format(summary.avgSecondsPerVideo), fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    Text("• Engagement: ${summary.tapsPer100Swipes} taps/100 swipes", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    Text("• Bedtime habits: ${summary.lateNightPct}% late-night, ${summary.lyingPct}% lying down", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    Text("• Nudge response: ${summary.wentHome}/${summary.nudges} left feed", fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                    if (summary.apps.isNotEmpty()) {
+                        Text("• App Telemetry Breakdown:", fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = Mint)
+                        summary.apps.forEach { app ->
+                            Text(
+                                "  - ${app.app}: ${app.minutes}m, ${app.meters}m, ${app.sessions} ses, %.1fs/vid, %d%% late".format(app.avgSecondsPerVideo, app.lateNightPct),
+                                fontSize = 10.sp,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color.White.copy(alpha = 0.85f),
+                            )
                         }
                     }
                 }
