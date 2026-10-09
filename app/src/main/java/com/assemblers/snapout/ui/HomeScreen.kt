@@ -46,6 +46,7 @@ import com.assemblers.snapout.core.FeedApps
 import com.assemblers.snapout.core.ScoreBreakdown
 import com.assemblers.snapout.core.Strictness
 import com.assemblers.snapout.core.TranceState
+import com.assemblers.snapout.service.NudgeNotifier
 import com.assemblers.snapout.ui.theme.Amber
 import com.assemblers.snapout.ui.theme.Coral
 import com.assemblers.snapout.ui.theme.Mint
@@ -90,6 +91,18 @@ fun HomeScreen(app: SnapOutApp, modifier: Modifier = Modifier) {
                     Text(if (connected) "Service running" else "Service off", fontSize = 13.sp, color = if (connected) Mint else Coral)
                 }
                 Switch(settings.enabled, onCheckedChange = { v -> app.settings.update { it.copy(enabled = v) } })
+            }
+        }
+
+        if (!NudgeNotifier.canPost(ctx)) Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("Allow notifications", fontWeight = FontWeight.SemiBold)
+                Text("Nudges arrive as notifications. Without this permission you won't see them.", fontSize = 14.sp)
+                Button(onClick = {
+                    ctx.startActivity(
+                        Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(AndroidSettings.EXTRA_APP_PACKAGE, ctx.packageName),
+                    )
+                }) { Text("Open notification settings") }
             }
         }
 
@@ -154,7 +167,7 @@ fun HomeScreen(app: SnapOutApp, modifier: Modifier = Modifier) {
 
         Card(Modifier.fillMaxWidth()) {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("Strictness", fontWeight = FontWeight.SemiBold)
+                Text("Nudge tone", fontWeight = FontWeight.SemiBold)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Strictness.entries.forEach { s ->
                         FilterChip(
@@ -164,7 +177,8 @@ fun HomeScreen(app: SnapOutApp, modifier: Modifier = Modifier) {
                         )
                     }
                 }
-                ToggleRow("Read message aloud", settings.speak) { v -> app.settings.update { it.copy(speak = v) } }
+                Text("Gentle asks questions; Strict is more direct. Repeated nudges in one night get firmer.", fontSize = 12.sp)
+                ToggleRow("Read nudge aloud", settings.speak) { v -> app.settings.update { it.copy(speak = v) } }
             }
         }
 
@@ -173,7 +187,7 @@ fun HomeScreen(app: SnapOutApp, modifier: Modifier = Modifier) {
                 Text("Demo", fontWeight = FontWeight.SemiBold)
                 ToggleRow("Demo mode (low thresholds, 5 s trigger)", settings.demoMode) { v -> app.settings.update { it.copy(demoMode = v) } }
                 ToggleRow("Pretend it's late & dark", settings.forceNight) { v -> app.settings.update { it.copy(forceNight = v) } }
-                Button(onClick = { app.engine.forceTrigger() }, enabled = connected) { Text("Trigger intervention now") }
+                Button(onClick = { app.engine.forceTrigger() }, enabled = connected) { Text("Send test nudge now") }
                 Text(
                     "Raw events — scroll ${diag.scrollEvents} (feed apps ${diag.feedScrollEvents}) · click ${diag.clickEvents} · " +
                         "window ${diag.windowEvents} · last ${diag.lastPackage ?: "-"}\nlast scroll ${diag.lastScroll ?: "-"}",
@@ -190,7 +204,7 @@ private fun Onboarding(initial: String, onSave: (String) -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("What do you want your evenings to be about?", fontWeight = FontWeight.SemiBold)
-            Text("Gemma uses this (on your phone only) to make each nudge personal.", fontSize = 13.sp)
+            Text("The on-device AI uses this (on your phone only) to make each nudge personal.", fontSize = 13.sp)
             OutlinedTextField(goal, { goal = it }, placeholder = { Text("e.g. be asleep by midnight") }, modifier = Modifier.fillMaxWidth())
             Button(onClick = { onSave(goal.trim()) }) { Text("Save goal") }
         }

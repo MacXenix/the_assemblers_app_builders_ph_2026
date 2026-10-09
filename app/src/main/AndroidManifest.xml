@@ -5,6 +5,7 @@
     <!-- Privacy guarantee: strip INTERNET even if a dependency requests it. -->
     <uses-permission android:name="android.permission.INTERNET" tools:node="remove" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".SnapOutApp"
@@ -38,5 +39,8 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_config" />
         </service>
+        <receiver
+            android:name=".service.NudgeNotifier$NudgeActionReceiver"
+            android:exported="false" />
     </application>
 </manifest>

@@ -1,6 +1,7 @@
 package com.assemblers.snapout.ai
 
 import com.assemblers.snapout.core.FeedApps
+import com.assemblers.snapout.core.InsightItem
 import com.assemblers.snapout.core.Strictness
 import com.assemblers.snapout.core.TranceSnapshot
 import java.util.Locale
@@ -16,11 +17,19 @@ data class ReframeContext(
     val strictness: Strictness,
     val recent: List<String>,
     val angle: String = "",
+    val swipesPerMin: Int = 0,
+    val secondsPerVideo: Int = 0,
+    val tapsPer100Swipes: Int = 0,
+    val late: Boolean = false,
+    val lyingDown: Boolean = false,
+    val mainSignal: String = "",
 ) {
     fun toJson(): String {
         val recentJson = recent.joinToString(",") { "\"" + it.replace("\"", "'") + "\"" }
         return """{"time":"$time","app":"$app","minutes":$minutes,"swipes":$swipes,"dark":$dark,""" +
             """"goal":"${goal.replace("\"", "'")}","interruption_number":$interventionsTonight,""" +
+            """"swipes_per_min":$swipesPerMin,"seconds_per_video":$secondsPerVideo,"taps_per_100_swipes":$tapsPer100Swipes,""" +
+            """"late_night":$late,"lying_down":$lyingDown,"main_signal":"$mainSignal",""" +
             """"tone":"${tone()}","angle":"$angle","recent":[$recentJson]}"""
     }
 
@@ -50,14 +59,32 @@ data class ReframeContext(
             strictness = strictness,
             recent = recent.takeLast(3),
             angle = PromptBuilder.ANGLES.random(),
+            swipesPerMin = snap.swipesPerMinute.toInt(),
+            secondsPerVideo = (snap.medianDwellMs / 1000).toInt(),
+            tapsPer100Swipes = if (snap.sessionSwipes == 0) 0 else 100 * snap.sessionTaps / snap.sessionSwipes,
+            late = snap.isLate,
+            lyingDown = snap.lyingDown,
+            mainSignal = mainSignal(snap),
         )
+
+        /** The score component contributing most points, in plain words, so the message addresses it. */
+        fun mainSignal(snap: TranceSnapshot): String = with(snap.breakdown) {
+            listOf(
+                "fast swiping" to 25 * swipeRate,
+                "very short views" to 20 * shortDwell,
+                "a long unbroken session" to 20 * sessionLength,
+                "passive watching with almost no taps" to 10 * lowTapRatio,
+                "scrolling in the dark late at night" to 15 * darkLate,
+                "scrolling while lying down" to 10 * lyingDown,
+            ).maxBy { it.second }.let { if (it.second > 0) it.first else "a long unbroken session" }
+        }
     }
 }
 
 object PromptBuilder {
-    const val SYSTEM = "You are SnapOut, a calm, non-judgmental attention coach that runs privately on the user's phone. " +
-        "The user is stuck in a mindless scrolling loop. Reply in at most 2 short sentences (35 words max). " +
-        "First reflect one concrete fact from the context, then ask ONE open question tied to the user's goal. " +
+    const val SYSTEM = "You write one phone notification for SnapOut, a calm, non-judgmental attention coach that runs privately on the user's phone. " +
+        "The user is stuck in a mindless scrolling loop right now. Write at most 2 short sentences (30 words max). " +
+        "First reflect the main_signal or one concrete number from the context, then ask ONE open question or suggest one small action tied to the user's goal. " +
         "Match the requested tone. No shaming, no diagnosis, no medical claims, no emojis, no hashtags. " +
         "Never repeat or closely paraphrase any message in \"recent\". Output only the message."
 
@@ -92,6 +119,26 @@ object PromptBuilder {
     /** What to show while tokens stream in: hides reasoning blocks, including one still open. */
     fun streamView(raw: String): String =
         raw.replace(Regex("(?s)<think>.*?</think>"), "").substringBefore("<think>").trimStart()
+
+    const val INSIGHTS_SYSTEM = "You are SnapOut's private on-device usage analyst. Below are the user's short-form feed statistics " +
+        "(JSON) for the last few days, measured only from scroll timing, taps, time of day and phone sensors. " +
+        "Write exactly 3 lines that start with \"Insight:\", each stating one specific pattern and citing the numbers. " +
+        "Then write exactly 3 lines that start with \"Tip:\", each giving one small, concrete, practical way to improve, tied to the user's goal. " +
+        "Each line at most 25 words. No shaming, no diagnosis, no medical claims, no emojis, no markdown. Output only those 6 lines."
+
+    fun insightsPrompt(summaryJson: String, goal: String) =
+        "$INSIGHTS_SYSTEM\n\nUser goal: ${goal.ifBlank { "use my phone more intentionally" }}\nStatistics: $summaryJson\nWrite the 6 lines."
+
+    private val insightLine = Regex("^(insight|tip)s?\\s*\\d*\\s*[:\\-]\\s*(.+)$", RegexOption.IGNORE_CASE)
+
+    /** Extracts "Insight:" / "Tip:" lines from model output, dropping reasoning, markdown and unsafe lines. */
+    fun parseInsights(raw: String): List<InsightItem> =
+        raw.replace(Regex("(?s)<think>.*?(</think>|$)"), "").lines()
+            .map { it.trim().trimStart('-', '*', '•', ' ').replace("**", "").replace(Regex("^\\d+[.)]\\s*"), "") }
+            .mapNotNull { insightLine.find(it) }
+            .map { InsightItem(it.groupValues[1].lowercase() == "tip", it.groupValues[2].trim()) }
+            .filter { item -> item.text.length > 8 && banned.none { item.text.lowercase().contains(it) } }
+            .let { items -> items.filterNot { it.tip }.take(4) + items.filter { it.tip }.take(4) }
 
     private val banned = listOf("addict", "disorder", "pathetic", "lazy", "loser", "shame", "diagnos", "depress")
 

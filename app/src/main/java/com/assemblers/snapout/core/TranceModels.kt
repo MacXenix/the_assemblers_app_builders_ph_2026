@@ -30,6 +30,8 @@ data class TranceSnapshot(
     val medianDwellMs: Long = 0,
     val sessionMinutes: Double = 0.0,
     val sessionSwipes: Int = 0,
+    val sessionTaps: Int = 0,
+    val lyingDown: Boolean = false,
     val sessionDistanceMeters: Double = 0.0,
     val lux: Float? = null,
     val isDark: Boolean = false,

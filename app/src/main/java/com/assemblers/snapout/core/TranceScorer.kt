@@ -18,11 +18,21 @@ class TranceScorer(var config: ScorerConfig = ScorerConfig.NORMAL) {
         private set
     var sessionSwipes = 0
         private set
+    var sessionTaps = 0
+        private set
+    private var dwellSumMs = 0L
+    private var dwellCount = 0
+
+    /** Mean time between swipes this session, ignoring pauses over 2 min. */
+    val sessionAvgDwellMs get() = if (dwellCount == 0) 0L else dwellSumMs / dwellCount
     private var sessionDistancePx = 0L
 
     fun startSession(now: Long) {
         sessionStart = now
         sessionSwipes = 0
+        sessionTaps = 0
+        dwellSumMs = 0
+        dwellCount = 0
         sessionDistancePx = 0
         swipes.clear()
         taps.clear()
@@ -48,6 +58,10 @@ class TranceScorer(var config: ScorerConfig = ScorerConfig.NORMAL) {
         val newItem = itemIndex >= 0 && lastItemIndex >= 0 && itemIndex != lastItemIndex &&
             now - lastSwipeAt > MIN_ITEM_SWIPE_MS
         if (afterGap || newItem) {
+            if (lastSwipeAt > 0 && now - lastSwipeAt < MAX_DWELL_MS) {
+                dwellSumMs += now - lastSwipeAt
+                dwellCount++
+            }
             swipes.addLast(now)
             sessionSwipes++
             lastSwipeAt = now
@@ -60,6 +74,7 @@ class TranceScorer(var config: ScorerConfig = ScorerConfig.NORMAL) {
     fun onTap(now: Long) {
         if (sessionStart == null) return
         taps.addLast(now)
+        sessionTaps++
     }
 
     fun compute(
@@ -110,6 +125,8 @@ class TranceScorer(var config: ScorerConfig = ScorerConfig.NORMAL) {
             medianDwellMs = dwell,
             sessionMinutes = sessionMin,
             sessionSwipes = sessionSwipes,
+            sessionTaps = sessionTaps,
+            lyingDown = lying >= 0.5,
             sessionDistanceMeters = meters,
             lux = lux,
             isDark = isDark,
@@ -127,6 +144,7 @@ class TranceScorer(var config: ScorerConfig = ScorerConfig.NORMAL) {
         const val WINDOW_MS = 60_000L
         const val SWIPE_GAP_MS = 350L
         const val MIN_ITEM_SWIPE_MS = 700L
+        const val MAX_DWELL_MS = 120_000L
         const val DARK_LUX = 10f
 
         fun stateFor(score: Int) = when {

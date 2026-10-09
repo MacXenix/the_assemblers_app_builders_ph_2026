@@ -18,15 +18,15 @@ import kotlinx.coroutines.launch
  */
 class SnapOutAccessibilityService : AccessibilityService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private lateinit var overlay: InterventionOverlay
+    private lateinit var notifier: NudgeNotifier
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
-        overlay = InterventionOverlay(this)
+        notifier = NudgeNotifier(this)
         val engine = app.engine
         engine.setConnected(true)
-        engine.onTrigger = { snap -> scope.launch { overlay.show(snap) } }
+        engine.onTrigger = { snap -> scope.launch { notifier.show(snap) } }
         scope.launch {
             while (isActive) {
                 engine.tick(System.currentTimeMillis())
@@ -56,12 +56,15 @@ class SnapOutAccessibilityService : AccessibilityService() {
         instance = null
         app.engine.setConnected(false)
         app.engine.onTrigger = null
-        if (::overlay.isInitialized) overlay.dismiss()
+        if (::notifier.isInitialized) notifier.close()
         scope.cancel()
         super.onDestroy()
     }
 
-    fun goHome() = performGlobalAction(GLOBAL_ACTION_HOME)
+    fun goHome() {
+        performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE)
+        performGlobalAction(GLOBAL_ACTION_HOME)
+    }
 
     companion object {
         @Volatile var instance: SnapOutAccessibilityService? = null
