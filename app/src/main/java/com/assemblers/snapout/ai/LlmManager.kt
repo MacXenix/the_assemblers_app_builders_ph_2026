@@ -10,6 +10,8 @@ import com.google.ai.edge.litertlm.EngineConfig
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.SamplerConfig
 import com.assemblers.snapout.core.InsightItem
+import com.assemblers.snapout.core.UsageSummary
+import java.util.Locale
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -40,6 +42,9 @@ data class AiStatus(
 /** Progress of an on-device usage analysis; [partial] is the text streamed so far. */
 data class InsightRun(val running: Boolean = false, val partial: String = "")
 
+/** One line in the Insights chat; [by] says who wrote an answer (model name or rules). */
+data class ChatMsg(val fromUser: Boolean, val text: String, val by: String = "")
+
 /** One generated nudge plus the evidence shown in the notification (latency, what the model saw). */
 data class Reframe(
     val text: String = "",
@@ -67,6 +72,14 @@ class LlmManager(private val context: Context, private val preferredModel: () ->
     private val _insightRun = MutableStateFlow(InsightRun())
     val insightRun: StateFlow<InsightRun> = _insightRun.asStateFlow()
     private var insightJob: Job? = null
+
+    private val _chat = MutableStateFlow<List<ChatMsg>>(emptyList())
+    val chat: StateFlow<List<ChatMsg>> = _chat.asStateFlow()
+
+    /** null = idle; otherwise the answer streamed so far ("" while the model is starting). */
+    private val _chatTyping = MutableStateFlow<String?>(null)
+    val chatTyping: StateFlow<String?> = _chatTyping.asStateFlow()
+    private var chatJob: Job? = null
     /** Set when GPU loaded but failed at generation time (e.g. no OpenCL); later loads go straight to CPU. */
     private var cpuOnly = false
     private val currentModelName get() = _status.value.modelName
@@ -180,6 +193,38 @@ class LlmManager(private val context: Context, private val preferredModel: () ->
         }
     }
 
+    /** Answers a question using only the usage stats. Falls back to a rule-based answer if the model is unavailable. */
+    fun ask(question: String, summary: UsageSummary, goal: String) {
+        val q = question.trim()
+        if (q.isEmpty() || chatJob?.isActive == true) return
+        val history = _chat.value.takeLast(6)
+        _chat.value = _chat.value + ChatMsg(true, q)
+        _chatTyping.value = ""
+        chatJob = scope.launch {
+            val g = withTimeoutOrNull(CHAT_TIMEOUT_MS) {
+                run(PromptBuilder.chatPrompt(q, summary.toJson(), goal, history), CHAT_TOKENS) { text, _ ->
+                    _chatTyping.value = PromptBuilder.streamView(text)
+                }
+            }
+            val answer = g?.let { PromptBuilder.cleanChat(it.raw) }?.takeIf { it.isNotBlank() }
+            val msg = if (g != null && answer != null) {
+                val model = currentModelName?.removeSuffix(".litertlm") ?: "local model"
+                val speed = g.ttftMs?.let { " · first word ${"%.1f".format(Locale.US, it / 1000.0)} s" } ?: ""
+                ChatMsg(false, answer, "$model · on-device$speed")
+            } else {
+                val why = if (_status.value.status == EngineStatus.NO_MODEL) "no model found" else "model failed or timed out"
+                ChatMsg(false, PromptBuilder.ruleAnswer(q, summary), "built-in rules ($why)")
+            }
+            _chat.value = _chat.value + msg
+            _chatTyping.value = null
+        }
+    }
+
+    fun clearChat() {
+        if (chatJob?.isActive == true) return
+        _chat.value = emptyList()
+    }
+
     private class Generation(val raw: String, val ttftMs: Long?, val tokensPerSec: Double)
 
     /** One prompt → full text. Retries once on CPU if the GPU loads but can't generate (e.g. no OpenCL). */
@@ -236,6 +281,8 @@ class LlmManager(private val context: Context, private val preferredModel: () ->
         private const val MAX_OUTPUT_TOKENS = 160
         private const val GENERATION_TIMEOUT_MS = 45_000L
         private const val INSIGHT_TOKENS = 360
+        private const val CHAT_TOKENS = 200
+        private const val CHAT_TIMEOUT_MS = 180_000L
         private const val INSIGHTS_TIMEOUT_MS = 240_000L
     }
 }

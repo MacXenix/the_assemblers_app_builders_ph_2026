@@ -136,6 +136,7 @@ This replaces any other accessibility services you had enabled.
 | 8 | Open TikTok/YouTube/Instagram, swipe every 2–3 s for ~1 min (Demo mode on) | Score on Home rises; nudge appears by itself |
 | 9 | Insights tab | Stats for the last 7 days, nudges (with what you did), feed sessions. Fresh install: **Load sample week (demo)** |
 | 9b | Insights → **Analyze my scrolling** | 3 "Seen" lines + 3 "Tip" lines by the local model (can take ~10–60 s; minutes on an emulator). No model → rule-based |
+| 9c | Insights → **Ask about your scrolling**: tap a suggestion (e.g. *Which app do I scroll the most?*) or type a question | Answer citing your numbers. Under it: model name + "on-device" means the model answered; "built-in rules" means no model was used |
 | 10 | Airplane mode on, repeat 3 & 8 | Still works, because everything is on-device |
 | 11 | Privacy tab | "✓ No network permission"; **Purge** empties Insights |
 

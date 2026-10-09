@@ -2,6 +2,8 @@ package com.assemblers.snapout.ai
 
 import com.assemblers.snapout.core.FeedApps
 import com.assemblers.snapout.core.InsightItem
+import com.assemblers.snapout.core.RuleInsights
+import com.assemblers.snapout.core.UsageSummary
 import com.assemblers.snapout.core.Strictness
 import com.assemblers.snapout.core.TranceSnapshot
 import java.util.Locale
@@ -139,6 +141,52 @@ object PromptBuilder {
             .map { InsightItem(it.groupValues[1].lowercase() == "tip", it.groupValues[2].trim()) }
             .filter { item -> item.text.length > 8 && banned.none { item.text.lowercase().contains(it) } }
             .let { items -> items.filterNot { it.tip }.take(4) + items.filter { it.tip }.take(4) }
+
+    const val CHAT_SYSTEM = "You are SnapOut's private on-device assistant. Answer the user's question about their short-form feed scrolling " +
+        "using ONLY the statistics JSON below (last 7 days, measured from scroll timing, taps, time of day and phone sensors; screen content is never read). " +
+        "Cite the exact numbers and app names from the JSON. If the statistics do not contain the answer, say you only know these usage stats. " +
+        "At most 3 short sentences. No shaming, no diagnosis, no medical claims, no emojis, no markdown."
+
+    fun chatPrompt(question: String, summaryJson: String, goal: String, history: List<ChatMsg>): String {
+        val past = history.joinToString("\n") { (if (it.fromUser) "User: " else "SnapOut: ") + it.text }
+        return "$CHAT_SYSTEM\n\nUser goal: ${goal.ifBlank { "use my phone more intentionally" }}\nStatistics: $summaryJson\n" +
+            (if (past.isNotBlank()) "Conversation so far:\n$past\n" else "") +
+            "User: $question\nSnapOut:"
+    }
+
+    fun cleanChat(raw: String): String =
+        raw.replace(Regex("(?s)<think>.*?(</think>|$)"), "")
+            .replace("**", "")
+            .trim()
+            .removePrefix("SnapOut:").removePrefix("Assistant:").trim()
+            .lines().takeWhile { !it.trimStart().startsWith("User:") }.joinToString("\n").trim()
+            .take(600)
+
+    /** Answer from the stats alone, used when no model is available. */
+    fun ruleAnswer(question: String, s: UsageSummary): String {
+        if (s.empty) return "No feed sessions logged yet. Scroll with SnapOut on, or tap Load sample week (demo)."
+        val q = question.lowercase()
+        val top = s.apps.maxByOrNull { it.minutes }
+        fun has(vararg w: String) = w.any { q.contains(it) }
+        return when {
+            has("improve", "tip", "help", "should", "stop", "reduce") ->
+                RuleInsights.from(s).filter { it.tip }.joinToString(" ") { it.text }.ifBlank { "Try a fixed stop time and keep the phone out of bed." }
+            has("app", "most", "often", "which", "where") && top != null ->
+                "${top.app} is your top feed: ${top.minutes} of ${s.totalMinutes} min over ${top.sessions} sessions in the last ${s.days} days." +
+                    s.apps.filter { it != top }.joinToString("") { " ${it.app}: ${it.minutes} min." }
+            has("when", "hour", "time", "night", "late") ->
+                "You scroll most around ${s.peakHour?.let { "%02d:00".format(it) } ?: "no clear hour"}; ${s.lateNightPct}% of your feed time is after 22:00."
+            has("swipe", "video", "fast", "skip") ->
+                "${s.totalSwipes} swipes in ${s.days} days, about ${"%.1f".format(s.avgSecondsPerVideo)} s per video."
+            has("tap", "like", "comment") -> "You tap ${s.tapsPer100Swipes} times per 100 swipes, so most videos are watched without interacting."
+            has("long", "session", "minute", "much") ->
+                "${s.minutesPerDay} min per active day, ${s.sessions} sessions, average ${s.avgSessionMinutes} min, longest ${s.longestSessionMinutes} min."
+            has("nudge", "notification") ->
+                "${s.nudges} nudges: you left the feed ${s.wentHome} times, snoozed ${s.snoozed}, ignored ${s.ignored}."
+            has("bed", "lying", "lie") -> "${s.lyingPct}% of your sessions were while lying down, and ${s.darkPct}% in the dark."
+            else -> "Last ${s.days} days: ${s.totalMinutes} min across ${s.sessions} sessions, mostly ${top?.app ?: "—"}. Ask about apps, times, swipes, taps, sessions or nudges."
+        }
+    }
 
     private val banned = listOf("addict", "disorder", "pathetic", "lazy", "loser", "shame", "diagnos", "depress")
 

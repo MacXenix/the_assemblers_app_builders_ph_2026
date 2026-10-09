@@ -1,6 +1,17 @@
 package com.assemblers.snapout.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -88,6 +99,8 @@ fun InsightsScreen(app: SnapOutApp, modifier: Modifier = Modifier) {
                 }
             }
         }
+
+        item { ChatCard(app, summary, settings.goal) }
 
         item { Text("Nudges", style = MaterialTheme.typography.titleLarge, modifier = Modifier.padding(top = 12.dp)) }
         if (interventions.isEmpty()) item { Text("None yet.", color = Color.Gray) }
@@ -218,5 +231,79 @@ private fun AnalysisCard(
             )
             if (showInput) Text(summaryJson, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = Color.White.copy(alpha = 0.7f))
         }
+    }
+}
+
+private val SUGGESTIONS = listOf(
+    "Which app do I scroll the most?",
+    "When do I scroll the most?",
+    "How fast do I swipe?",
+    "How do I respond to nudges?",
+    "How can I improve?",
+)
+
+@Composable
+private fun ChatCard(app: SnapOutApp, summary: UsageSummary, goal: String) {
+    val chat by app.llm.chat.collectAsState()
+    val typing by app.llm.chatTyping.collectAsState()
+    val ai by app.llm.status.collectAsState()
+    var input by remember { mutableStateOf("") }
+    val busy = typing != null
+    val send: (String) -> Unit = { q ->
+        if (q.isNotBlank() && !busy) {
+            app.llm.ask(q, summary, goal)
+            input = ""
+        }
+    }
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Ask about your scrolling", fontWeight = FontWeight.SemiBold)
+            Text(
+                "Answers come from the on-device model using only the stats above. " +
+                    "Model: ${ai.modelName?.removeSuffix(".litertlm") ?: "none found (built-in rules answer)"}",
+                fontSize = 12.sp,
+            )
+            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                SUGGESTIONS.forEach { q ->
+                    OutlinedButton(onClick = { send(q) }, enabled = !busy, contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp)) {
+                        Text(q, fontSize = 12.sp)
+                    }
+                }
+            }
+            chat.forEach { m -> Bubble(m.fromUser, m.text, m.by) }
+            typing?.let { t ->
+                Bubble(false, t.ifBlank { "Thinking on-device…" }, "")
+                LinearProgressIndicator(Modifier.fillMaxWidth(), color = Amber)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it },
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Ask a question…", fontSize = 13.sp) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { send(input) }),
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = { send(input) }, enabled = !busy && input.isNotBlank()) { Text("Ask") }
+            }
+            if (chat.isNotEmpty() && !busy) Text(
+                "Clear chat", fontSize = 12.sp, color = Amber, modifier = Modifier.clickable { app.llm.clearChat() },
+            )
+        }
+    }
+}
+
+@Composable
+private fun Bubble(fromUser: Boolean, text: String, by: String) {
+    Column(Modifier.fillMaxWidth(), horizontalAlignment = if (fromUser) Alignment.End else Alignment.Start) {
+        Surface(
+            color = if (fromUser) Mint.copy(alpha = 0.18f) else Color.White.copy(alpha = 0.07f),
+            shape = RoundedCornerShape(12.dp),
+        ) {
+            Text(text, Modifier.padding(10.dp), fontSize = 14.sp)
+        }
+        if (by.isNotBlank()) Text(by, fontSize = 11.sp, color = Color.Gray)
     }
 }
